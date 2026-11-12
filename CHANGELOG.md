@@ -4,6 +4,8 @@
 
 <!-- changelog: entries for the next release go here -->
 
+- Honor an explicit `disk_gb` footprint when admitting named and derived Tart images, while retaining the disk reserve.
+
 ## v0.0.1-beta-5
 
 **Changed**

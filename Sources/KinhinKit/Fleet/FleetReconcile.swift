@@ -525,15 +525,14 @@ extension FleetEngine {
         return vms
     }
 
-    /// Disk a new instance of `slot` takes. A Tart clone of a named image costs that image's own disk
-    /// size, as `tart list` reports it; the base image, other runtimes, and an unknown size use the
-    /// configured VM disk.
+    /// Disk a new instance of `slot` takes. An explicit footprint overrides a Tart image's virtual
+    /// disk size; without one, named images use their listed disk and other slots use the runtime default.
     func diskPerInstanceGB(_ slot: ScalePlan.Slot, listed: [TartVM]) -> Int {
         guard slot.runtime == .tart else {
             return ResourceProbe.effectiveDiskPerVMGB(diskGB: config.diskGB, runtime: slot.runtime)
         }
         let size = slot.image.flatMap { name in listed.first { $0.name == name }?.diskGB }
-        return ResourceProbe.effectiveDiskPerVMGB(diskGB: size ?? config.diskGB, runtime: .tart)
+        return ResourceProbe.effectiveDiskPerVMGB(diskGB: config.diskGB ?? size, runtime: .tart)
     }
 
     /// Starts the warm instances planned per image (cloned and booted, never registered) unless the
