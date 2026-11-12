@@ -4,6 +4,8 @@
 
 <!-- changelog: entries for the next release go here -->
 
+- Assign mixed-runtime runners to accounts with demand for their selected runtime and named container pool.
+
 - Honor an explicit `disk_gb` footprint when admitting named and derived Tart images, while retaining the disk reserve.
 
 ## v0.0.1-beta-5

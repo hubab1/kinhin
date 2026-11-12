@@ -61,6 +61,9 @@ struct ScalePlan: Equatable {
         var minIdle: [IdleKey: Int] = [:]
         /// Queued Apple container jobs per named container pool (`ScalePlan+ContainerPools`).
         var containerPoolDemand: [String: Int] = [:]
+        /// The same named-pool demand by account, so a pool cannot register its
+        /// runner in another account that has no jobs that pool can execute.
+        var containerPoolDemandByAccount: [String: [String: Int]] = [:]
         /// The named container pools' shapes and caps, by name. Empty: the `container:` section is one pool, sized by
         /// `poolCaps` alone, exactly as before pools.
         var containerPools: [String: ContainerPoolShape] = [:]
@@ -307,7 +310,6 @@ struct ScalePlan: Equatable {
     private static func slots(count: Int, active: [VMRecord], input: Input, reserved: [RuntimeID: Int] = [:]) -> [Slot]
     {
         guard count > 0 else { return [] }
-        let totals = input.demand.mapValues { $0.values.reduce(0, +) }
         let queuedTart = input.demand.values.reduce(0) { $0 + ($1[.tart] ?? 0) }
         var sim = active
         var out: [Slot] = []
@@ -315,14 +317,6 @@ struct ScalePlan: Equatable {
         // named pool's shape fits what is left of the budget.
         var exhausted: Set<RuntimeID> = []
         while out.count < count {
-            // The account with the most unmet demand (its jobs minus the
-            // instances that can serve them).
-            var coverage: [String: Int] = [:]
-            for record in sim where covers(record, includesRunning: input.includesRunning) {
-                if let account = record.platform { coverage[account, default: 0] += 1 }
-            }
-            let account = ForgeDemand.assignAccount(demand: totals, active: coverage, attached: input.attached)
-
             // The pool with the most unmet demand within its capacity.
             let unmet = unmetByPool(records: sim, input: input)
             var caps = input.poolCaps
@@ -359,10 +353,40 @@ struct ScalePlan: Equatable {
                 pool = picked
             }
 
+            // Pick an account only after the executable runtime/pool is known.
+            // Total demand can belong to a different OS or named Linux pool.
+            guard let demand = accountDemand(runtime: chosen, containerPool: pool, input: input) else { break }
+            let waiting = Set(demand.filter { $0.value > 0 }.keys)
+            let candidates = waiting.isEmpty ? input.attached : input.attached.intersection(waiting)
+            guard !candidates.isEmpty else { break }
+            var coverage: [String: Int] = [:]
+            for record in sim
+            where Self.pool(of: record, input: input) == chosen
+                && (pool == nil || containerPool(of: record, input: input) == pool)
+                && covers(record, includesRunning: input.includesRunning)
+            {
+                if let account = record.platform { coverage[account, default: 0] += 1 }
+            }
+            let account = ForgeDemand.assignAccount(demand: demand, active: coverage, attached: candidates)
             out.append(Slot(account: account, runtime: chosen, image: image, pool: pool))
             sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)"))
         }
         return out
+    }
+
+    /// Demand an account can execute in this slot. Older single-account
+    /// callers need no named-pool breakdown; ambiguous attribution fails closed.
+    static func accountDemand(runtime: RuntimeID, containerPool: String?, input: Input) -> [String: Int]? {
+        let byRuntime = input.demand.mapValues { $0[runtime] ?? 0 }
+        guard runtime == .appleContainer, let containerPool else { return byRuntime }
+        guard !input.containerPoolDemandByAccount.isEmpty else {
+            return byRuntime.values.filter { $0 > 0 }.count <= 1 ? byRuntime : nil
+        }
+        let demand = input.containerPoolDemandByAccount.mapValues { $0[containerPool] ?? 0 }
+        if (input.containerPoolDemand[containerPool] ?? 0) > 0, !demand.values.contains(where: { $0 > 0 }) {
+            return nil
+        }
+        return demand
     }
 
     /// The runtime for a new instance: among pools with unmet demand the one

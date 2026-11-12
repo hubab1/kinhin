@@ -108,6 +108,9 @@ extension ScalePlan.Input {
     mutating func exclude(containerPools names: Set<String>, demandByAccount: [String: [String: Int]]) {
         guard !names.isEmpty else { return }
         unavailableContainerPools.formUnion(names)
+        containerPoolDemandByAccount = containerPoolDemandByAccount.mapValues {
+            $0.filter { !names.contains($0.key) }
+        }
         for name in names { containerPoolDemand[name] = nil }
         for (account, pools) in demandByAccount {
             let dropped = names.reduce(0) { $0 + (pools[$1] ?? 0) }

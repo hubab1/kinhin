@@ -390,6 +390,7 @@ extension FleetEngine {
         // Named container pools: their demand, shapes and the budget they share (none without `pools:`).
         if let container = config.container, !container.pools.isEmpty {
             input.containerPoolDemand = demand.byContainerPool
+            input.containerPoolDemandByAccount = demand.byForgeContainerPool
             input.containerPools = Dictionary(
                 uniqueKeysWithValues: container.pools.map {
                     ($0.name, ScalePlan.ContainerPoolShape(cpus: $0.cpus, memoryGB: $0.memoryGB, max: $0.max))
