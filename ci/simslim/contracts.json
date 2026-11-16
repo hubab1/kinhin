@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "repositories": {
+    "hubab1/remind": {
+      "profile": "native-ci.json",
+      "requires": ["push", "storekit", "universal-links", "spotlight", "files-recents", "siri", "icloud", "keychain-sync", "photos", "widgets", "screen-time"]
+    },
+    "hubab1/utter": {
+      "profile": "native-ci.json",
+      "requires": ["push", "storekit", "universal-links", "spotlight", "files-recents", "siri", "icloud", "keychain-sync", "photos", "widgets"]
+    }
+  }
+}

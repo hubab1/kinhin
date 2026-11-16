@@ -55,6 +55,10 @@ public final class FleetEngine: Sendable {
     let githubFactory: GitHubClientFactory
     /// Resolves an account's token (forge, account name).
     let tokenLoader: @Sendable (ForgeID, String) throws -> String?
+    let claimHost: (@Sendable () throws -> Void)?
+    /// True while the last start was refused by the host lock: this engine owns nothing, so `stop()` must not
+    /// delete the instances in the shared store (they belong to the engine that holds the lock).
+    let hostClaimRefused = Locked(false)
     /// Host snapshot for the pre-spawn disk guard.
     let hostProbe: @Sendable () -> HostResources
     /// How long `detachKeepingInstances()` waits for cancelled lifecycle
@@ -82,6 +86,8 @@ public final class FleetEngine: Sendable {
     let jobTraces = Mutex<[String: JobTrace]>([:])
     /// Healing events already counted in `kinhin.healing.actions`.
     let healingCounted = Mutex(HealingCounted())
+    /// The loop that forwards the fleet's problems to the alert webhook (`FleetEngine+Alerting.swift`).
+    let alertTask = Mutex<Task<Void, Never>?>(nil)
     /// The daemon process's own CPU and memory.
     let processUsage = ProcessUsage()
     /// When this engine was built, and when its last reconcile pass completed (for `kinhin.reconcile.last_success`).
@@ -178,6 +184,7 @@ public final class FleetEngine: Sendable {
     ) {
         self.githubFactory = dependencies.githubFactory ?? GitHubClientFactory { _ in github }
         self.tokenLoader = dependencies.tokenLoader
+        self.claimHost = dependencies.claimHost
         self.hostProbe = dependencies.hostProbe ?? { [host] in host }
         self.lifecycleDrainTimeout = dependencies.lifecycleDrainTimeout
         self.spawnPacer = SpawnPacer(interval: dependencies.spawnStagger)
@@ -241,7 +248,8 @@ public final class FleetEngine: Sendable {
         let projectStore = dependencies.projectImageStore ?? ProjectImageStore()
         self.projectStore = projectStore
         self.projectImages = ProjectImageBuilder(
-            tart: tart, store: projectStore, baseImage: config.image, ssh: ssh, bake: dependencies.projectBake,
+            tart: tart, store: projectStore, baseImage: config.image, cachePolicy: config.toolchainCache,
+            ssh: ssh, bake: dependencies.projectBake,
             onBake: Self.bakeRecorder(dependencies.telemetry))
         // The primary runtime's cap; its disk estimate also feeds the
         // pre-spawn disk guard and `kinhin doctor`.
@@ -321,6 +329,9 @@ extension FleetEngine {
         /// Where the Docker Hub cache keeps its data; nil → `DockerRegistryCache.defaultDataDirectory` (tests point it
         /// at a temporary directory).
         var registryCacheDirectory: URL?
+        /// Claims the host's single-engine lock before the engine starts; throws when another process owns the
+        /// fleet. nil → no claim (tests, which build many engines).
+        public var claimHost: (@Sendable () throws -> Void)?
 
         public init(
             githubFactory: GitHubClientFactory? = nil,
@@ -350,6 +361,7 @@ extension FleetEngine {
         public static func live(healing: KinhinConfig.HealingConfig = .default) -> Dependencies {
             var live = Dependencies(hostProbe: { ResourceProbe().snapshot() })
             live.healingHost = .live
+            live.claimHost = { try DaemonLock.holdForProcess() }
             live.telemetry = TelemetryService.shared.telemetry
             live.healingAdvisor = HealingAdvisors.production(config: healing)
             live.healingTimings = HealingAdvisors.productionTimings()

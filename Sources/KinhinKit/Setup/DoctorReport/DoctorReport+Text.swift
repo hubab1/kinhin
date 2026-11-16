@@ -230,6 +230,20 @@ extension DoctorReport {
                 }
             }
         }
+        if let alerts {
+            for (index, webhook) in alerts.webhooks.enumerated() {
+                let label = index == 0 ? "alerts" : ""
+                let events = webhook.events.map { " [\($0.joined(separator: ", "))]" } ?? ""
+                let target = "\(webhook.name) → \(webhook.endpoint ?? "?") (\(webhook.format))\(events)"
+                if webhook.ok {
+                    if index == 0 { row(label, "on ✓ \(target)") } else { more("on ✓ \(target)") }
+                } else {
+                    let line = "ON but \(webhook.name): \(webhook.problem ?? "not working") ✗"
+                    if index == 0 { row(label, line) } else { more(line) }
+                    if let fix = webhook.fix { more(fix) }
+                }
+            }
+        }
         if let base = tartBaseImage {
             switch base.state {
             case "known": row("base image", "\(base.reference) ✓ (\(base.pinned ? "pinned" : "pre-configured"))")

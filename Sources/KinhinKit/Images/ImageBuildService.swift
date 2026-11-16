@@ -39,8 +39,7 @@ public enum ImageBuildService {
                 localImages: await DockerRuntime(shell: shell, image: docker.image).localImageNames(
                     reusing: docker.image, for: docker.platform),
                 fallback: LinuxBaseImage.resolve(configured: docker.baseImage))
-            var options = DockerImagePreparer.Options(image: base, target: docker.image)
-            options.platform = docker.platform
+            let options = dockerOptions(config: cfg, image: base, target: docker.image)
             try await DockerImagePreparer(shell: shell).prepare(options)
         case .host:
             break  // host runners use the Mac itself: nothing to build
@@ -52,5 +51,11 @@ public enum ImageBuildService {
         guard let image, image != cfg.image else { return ImagePreparer.Options(config: cfg) }
         guard let entry = cfg.images.first(where: { $0.name == image }) else { throw ImageError.unknownImage(image) }
         return ImagePreparer.Options(config: cfg, image: entry)
+    }
+
+    /// The config-backed Docker options shared by CLI preparation and app/setup rebuilds.
+    public static func dockerOptions(config cfg: KinhinConfig, image: String, target: String) -> LinuxImageOptions {
+        LinuxImageOptions(
+            image: image, target: target, platform: cfg.docker?.platform ?? .arm64, cachePolicy: cfg.toolchainCache)
     }
 }

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { docsLinks } from "./docsLinks";
+import { generateLlms } from "./llms";
 import versions from "../versions.json";
 
 // https://vitepress.dev/reference/site-config
@@ -46,7 +47,7 @@ export default defineConfig({
   srcDir: "..",
   srcExclude: [
     "*.md",
-    "{Sources,Tests,Plugins,scripts,dist,shots,assets,video}/**",
+    "{Sources,Tests,Plugins,scripts,ci,dist,shots,assets,video}/**",
     "**/node_modules/**",
     "docs/plans/**",
     "docs/{app,adding-a-forge}.md",
@@ -82,6 +83,16 @@ export default defineConfig({
   // website/public instead: Vite serves it in dev, and buildEnd copies it into the output.
   buildEnd: async (siteConfig) => {
     fs.cpSync(path.join(siteRoot, "public"), siteConfig.outDir, { recursive: true });
+    // Markdown copies of every page plus llms.txt / llms-full.txt. Snapshot builds come from old tags
+    // that predate this, so only the latest docs publish them.
+    if (!docsVersion) generateLlms(siteConfig, siteURL, base);
+  },
+  // Point agents at the markdown copy of each page.
+  transformHead: ({ pageData }) => {
+    if (docsVersion || pageData.isNotFound || !pageData.relativePath.endsWith(".md")) return;
+    return [
+      ["link", { rel: "alternate", type: "text/markdown", href: `${base}${pageData.relativePath}` }],
+    ];
   },
   vite: {
     publicDir: path.join(siteRoot, "public"),
@@ -153,6 +164,7 @@ export default defineConfig({
           { text: "Requeue and skip queued jobs", link: "/guide/requeue-skip" },
           { text: "The healing agent", link: "/guide/healing" },
           { text: "Telemetry (OpenTelemetry)", link: "/guide/telemetry" },
+          { text: "Alerts (webhooks)", link: "/guide/alerts" },
           { text: "Test workflows locally", link: "/guide/workflow-testing" },
           { text: "Benchmarks", link: "/guide/benchmarks" },
         ],

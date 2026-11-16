@@ -15,9 +15,15 @@ extension KinhinConfig {
         /// (fractions of the usable CPU+RAM budget; the remainder, if any,
         /// goes to the default runtime).
         public var budget: [String: Double]
+        /// Let on-demand Tart instances use idle shares, within the host's
+        /// combined CPU/RAM limit. Other runtimes retain their partition caps.
+        public var borrowIdleBudget: Bool
         /// Repo or `owner/repo@workflow` → runtime. Repo routes take
         /// precedence over workflow routes; first matching route wins.
         public var routes: [Route]
+        /// `runtimes.tart.enabled` (default true). false takes the Tart VM pool out of routing and scheduling;
+        /// running VMs drain.
+        public var tartEnabled: Bool
 
         public struct Route: Sendable, Equatable {
             /// "owner/name" or "owner/name@Workflow Name".
@@ -41,16 +47,40 @@ extension KinhinConfig {
         }
 
         public init(
-            defaultRuntime: RuntimeID = .tart, budget: [String: Double] = [:], routes: [Route] = []
+            defaultRuntime: RuntimeID = .tart, budget: [String: Double] = [:], routes: [Route] = [],
+            tartEnabled: Bool = true, borrowIdleBudget: Bool = false
         ) {
+            self.tartEnabled = tartEnabled
             self.defaultRuntime = defaultRuntime
             self.budget = budget
+            self.borrowIdleBudget = borrowIdleBudget
             self.routes = routes
         }
 
         enum CodingKeys: String, CodingKey {
             case defaultRuntime = "default"
             case budget, routes
+            case tartEnabled = "tart"
+            case borrowIdleBudget = "borrow_idle_budget"
         }
     }
+}
+
+extension KinhinConfig {
+    /// The Apple-container section when it takes jobs: configured, switched on, and with at least one enabled pool.
+    /// nil when it is absent or disabled. Capacity, routing and health read this; the engine still builds a disabled
+    /// section's runtime from `container`, so its running instances drain.
+    public var activeContainer: ContainerConfig? {
+        guard let container, container.enabled, !container.enabledPools.isEmpty else { return nil }
+        return container
+    }
+
+    /// The Docker section when it takes jobs (see `activeContainer`).
+    public var activeDocker: DockerForgeConfig? {
+        guard let docker, docker.enabled else { return nil }
+        return docker
+    }
+
+    /// Whether the Tart VM pool takes jobs (`runtimes.tart.enabled`, default true).
+    public var tartEnabled: Bool { runtimes?.tartEnabled ?? true }
 }

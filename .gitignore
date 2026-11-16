@@ -25,3 +25,7 @@ bad.sha256
 
 # Screenshots copied in for a local video build (CI downloads them into this folder for a `screens` look).
 video/screens/
+
+# Python CI helper bytecode
+__pycache__/
+*.pyc

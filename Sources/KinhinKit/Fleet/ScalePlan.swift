@@ -45,6 +45,8 @@ struct ScalePlan: Equatable {
         var capacityCap: Int
         /// Per-runtime partition caps; a runtime with no entry is uncapped.
         var poolCaps: [RuntimeID: Int] = [:]
+        /// Combined CPU/RAM admission, nil for legacy fixed partitions.
+        var resources: ScaleResourceBudget? = nil
         /// Runtimes backing off after repeated start failures.
         var heldRuntimes: Set<RuntimeID> = []
         /// Runtimes that have a configured pool.
@@ -326,9 +328,7 @@ struct ScalePlan: Equatable {
             // The in-flight pooled clones already hold a slot in their pool.
             for (pool, count) in reserved { running[pool, default: 0] += count }
             guard
-                let chosen = selectRuntime(
-                    unmet: unmet, active: running, caps: caps, fallback: input.defaultRuntime,
-                    poolExists: input.existingPools.contains)
+                let chosen = selectRuntimeForAdmission(unmet: unmet, active: running, caps: caps, input: input)
             else { break }  // unmet demand but no pool may take another instance
             if input.heldRuntimes.contains(chosen) { break }  // every pool with demand is backing off
             if exhausted.contains(chosen) { break }  // the fallback runtime is out of room
@@ -352,6 +352,10 @@ struct ScalePlan: Equatable {
                 }
                 pool = picked
             }
+            guard resourceFits(runtime: chosen, containerPool: pool, records: sim, input: input) else {
+                exhausted.insert(chosen)
+                continue
+            }
 
             // Pick an account only after the executable runtime/pool is known.
             // Total demand can belong to a different OS or named Linux pool.
@@ -369,7 +373,7 @@ struct ScalePlan: Equatable {
             }
             let account = ForgeDemand.assignAccount(demand: demand, active: coverage, attached: candidates)
             out.append(Slot(account: account, runtime: chosen, image: image, pool: pool))
-            sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)"))
+            sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)", input: input))
         }
         return out
     }

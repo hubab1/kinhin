@@ -578,7 +578,9 @@ runtimes:
 
 Precedence: **workflow route → repo route → `runs-on:` label → default**. Capacity is split by the `budget` weights —
 each runtime gets its share of the host's CPU cores and of its RAM, and may only run what both allow — and
-`kinhin status` shows the result. If a split would leave a configured route with zero capacity, the app warns you
+`kinhin status` shows the result. On-demand Tart fleets can opt into
+[borrowing idle capacity](scaling.md#borrowing-idle-tart-capacity), subject to a combined CPU/RAM admission limit.
+If a split would leave a configured route with zero capacity, the app warns you
 before you can save it.
 
 Manage routes in **Advanced → Routing** (pools with a live health chip, the named
@@ -586,6 +588,30 @@ Manage routes in **Advanced → Routing** (pools with a live health chip, the na
 `kinhin runtimes route add|remove`. The capacity split lives in **Advanced → Capacity**: a budget slider per runtime —
 drag it or type a percent, and lock a pool to keep its share fixed while the others rebalance. `kinhin runtimes` prints the same summary. Changes edit only the relevant
 part of `config.yaml`, must pass full validation, and reach a running fleet without a restart.
+
+## Turning a pool off
+
+Every pool has an on/off switch, so you can keep its settings without it taking jobs. In **Advanced → Routing** each
+pool card has a switch; in `config.yaml` it is `enabled: false` on `container:` (or on one entry of
+`container.pools`), on `docker:`, and `runtimes.tart.enabled: false` for Tart VMs:
+
+```yaml
+docker:
+  image: kinhin-ci-linux
+  enabled: false # kept, but off
+runtimes:
+  default: tart
+  tart:
+    enabled: true
+```
+
+A disabled pool is out of routing: its labels are no longer served or counted as demand, no GitHub scale set listens
+for it, it spawns nothing (no `min_idle` or `warm_pool` floor either), its budget share falls to the default pool,
+and it disappears from the Fleet page once its last instance is gone. Instances already running **drain**: they
+finish their current job and are not replaced. Turning the pool back on restores it exactly as it was.
+
+The default pool, a pool a route names, and the last enabled pool cannot be turned off (the config would not load and
+the switch is disabled). A budget share on a disabled pool is ignored, so you do not need to edit Capacity first.
 
 ## Route one workflow with the CLI
 

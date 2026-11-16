@@ -75,6 +75,20 @@ enum ImageCommand {
         return [bake(target)]
     }
 
+    /// Docker keeps the configured cache policy when a one-off platform override is applied.
+    static func dockerBakeOptions(
+        args: [String], config: KinhinConfig, image: String, target: String
+    ) throws -> LinuxImageOptions {
+        var options = ImageBuildService.dockerOptions(config: config, image: image, target: target)
+        if let raw = flag("--platform", in: args) {
+            guard let parsed = LinuxPlatform(configValue: raw) else {
+                throw CLIError("--platform must be linux/arm64 or linux/amd64, got \"\(raw)\"", exit: .usage)
+            }
+            options.platform = parsed
+        }
+        return options
+    }
+
     /// `--source NAME` bakes from that VM (a local tart VM, such as the one `--linux` creates, or a registry
     /// reference) and `--target NAME` writes the result there, for a tart bake. Both were accepted and silently
     /// ignored, so the documented `image prepare --linux …` then `image prepare --source <vm>` flow baked from the
@@ -262,17 +276,9 @@ enum ImageCommand {
             let target = flag("--target", in: args) ?? "kinhin-ci-linux"
             do {
                 let preparer = DockerImagePreparer(shell: shell)
-                var options = DockerImagePreparer.Options(image: image, target: target)
                 // --platform overrides docker.platform for this bake; amd64
                 // runs under emulation, so say so before the long work starts.
-                if let raw = flag("--platform", in: args) {
-                    guard let parsed = LinuxPlatform(configValue: raw) else {
-                        fail("--platform must be linux/arm64 or linux/amd64, got \"\(raw)\"", exit: .usage)
-                    }
-                    options.platform = parsed
-                } else {
-                    options.platform = cfg.docker?.platform ?? .arm64
-                }
+                let options = try dockerBakeOptions(args: args, config: cfg, image: image, target: target)
                 if options.platform.isEmulated {
                     warn(LinuxPlatform.emulationNotice)
                 }

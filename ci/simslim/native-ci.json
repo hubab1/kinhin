@@ -1,0 +1,6 @@
+{
+  "name": "native-ci",
+  "description": "Preserve widgets, Screen Time, speech, authentication, storage, notifications and test diagnostics. Disable unused PIM, Health/Home, telemetry and MDM services.",
+  "except": ["widgets", "siri", "search", "icloud", "store", "web", "family", "photos", "apps", "messaging", "connectivity", "other"],
+  "keep": ["com.apple.apsd", "com.apple.devicecheckd", "com.apple.diagnosticextensionsd", "com.apple.managedassetsd"]
+}

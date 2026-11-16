@@ -13,6 +13,9 @@ extension FleetEngine {
     /// engine was built with, so a change there silently does nothing until
     /// the engine is rebuilt.
     public static func restartRequired(from old: KinhinConfig, to new: KinhinConfig) -> Bool {
+        // Both switches change admission policy frozen into the engine.
+        if old.tartEnabled != new.tartEnabled { return true }
+        if (old.runtimes?.borrowIdleBudget ?? false) != (new.runtimes?.borrowIdleBudget ?? false) { return true }
         var a = old
         var b = new
         a.runtimes = nil
@@ -42,6 +45,7 @@ extension FleetEngine {
     public func detachKeepingInstances() async {
         runState.withLock { $0.running = false }
         healing.stopLoop()
+        stopAlerting()
         cachePruneTask?.cancel()
         cachePruneTask = nil
         // Wait out an in-flight reconcile pass first: one already in its
@@ -69,6 +73,9 @@ extension FleetEngine {
         retry?.cancel()
         await drain([retry].compactMap { $0 }, timeout: lifecycleDrainTimeout)
         await settleDeletes(timeout: lifecycleDrainTimeout)
+        // The listeners' poll tasks retain themselves, so a detached engine that left them running would leave
+        // orphans retrying against a freed engine forever ("the engine was replaced"), still holding sessions.
+        await stopAttachedListeners()
         invalidateRegistrationTokens()
     }
 
@@ -164,7 +171,8 @@ extension FleetEngine {
     /// never starts one, so its jobs would wait without a word otherwise. `kinhin doctor` reports the same.
     func warnAboutUnfittableContainerPools(_ snapshot: Router.Snapshot) {
         guard let budget = snapshot.containerBudget else { return }
-        for pool in config.container?.pools ?? [] where budget.count(cpu: pool.cpus, memoryGB: pool.memoryGB) == 0 {
+        for pool in config.activeContainer?.enabledPools ?? []
+        where budget.count(cpu: pool.cpus, memoryGB: pool.memoryGB) == 0 {
             Log.warn(
                 "engine",
                 "container pool \(pool.name) (\(pool.cpus) CPU, \(pool.memoryGB) GB) can never start: the Apple "

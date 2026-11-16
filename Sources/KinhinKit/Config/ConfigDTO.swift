@@ -46,6 +46,7 @@ public struct PartialConfig: Decodable {
     var accounts: [PartialAccount]?
     var healing: PartialHealing?
     var telemetry: PartialTelemetry?
+    var alerts: PartialAlerts?
 
     struct PartialAccount: Decodable {
         var name: String?
@@ -98,8 +99,11 @@ public struct PartialConfig: Decodable {
         var platform: String?
         /// Named pools, keyed by name; the keys above are their defaults.
         var pools: [String: PartialContainerPool]?
+        /// `false` turns the Apple-container pool(s) off without dropping the section (default true).
+        var enabled: Bool?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
+            case enabled
             case image
             case cpus
             case memoryGB = "memory_gb"
@@ -129,8 +133,11 @@ public struct PartialConfig: Decodable {
         var max: Int?
         /// The pool's own `platform` (see `PartialContainer.platform`).
         var platform: String?
+        /// `false` turns this pool off (default true).
+        var enabled: Bool?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
+            case enabled
             case image
             case cpus
             case memoryGB = "memory_gb"
@@ -154,8 +161,11 @@ public struct PartialConfig: Decodable {
         var platform: String?
         var fleetLabels: Bool?
         var minIdle: Int?
+        /// `false` turns the Docker pool off without dropping the section (default true).
+        var enabled: Bool?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
+            case enabled
             case image
             case cpus
             case memoryGB = "memory_gb"
@@ -171,9 +181,21 @@ public struct PartialConfig: Decodable {
         var `default`: String?
         var budget: [String: Double]?
         var routes: [PartialRoute]?
+        var tart: PartialRuntimeTart?
+        var borrowIdleBudget: Bool?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
-            case `default`, budget, routes
+            case `default`, budget, routes, tart
+            case borrowIdleBudget = "borrow_idle_budget"
+        }
+    }
+
+    /// `runtimes.tart:` — the Tart VM pool's on/off switch.
+    struct PartialRuntimeTart: Decodable {
+        var enabled: Bool?
+
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case enabled
         }
     }
 
@@ -239,6 +261,40 @@ public struct PartialConfig: Decodable {
                 case fastModel = "fast_model"
                 case keepAlive = "keep_alive"
             }
+        }
+    }
+
+    struct PartialAlerts: Decodable {
+        var enabled: Bool?
+        /// The single-endpoint form from before `webhooks:`; read as one webhook named `default`.
+        var webhook: PartialWebhook?
+        var webhooks: [PartialWebhook]?
+        var minSeverity: String?
+        var cooldownSeconds: Int?
+        var notifyOnResolve: Bool?
+
+        struct PartialWebhook: Decodable {
+            var name: String?
+            var url: String?
+            var format: String?
+            var headersKeychain: String?
+            var minSeverity: String?
+            var events: [String]?
+            var notifyOnResolve: Bool?
+
+            enum CodingKeys: String, CodingKey, CaseIterable {
+                case name, url, format, events
+                case headersKeychain = "headers_keychain"
+                case minSeverity = "min_severity"
+                case notifyOnResolve = "notify_on_resolve"
+            }
+        }
+
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case enabled, webhook, webhooks
+            case minSeverity = "min_severity"
+            case cooldownSeconds = "cooldown_seconds"
+            case notifyOnResolve = "notify_on_resolve"
         }
     }
 
@@ -359,6 +415,7 @@ public struct PartialConfig: Decodable {
         case accounts
         case healing
         case telemetry
+        case alerts
     }
 
     /// forgejo is a stored property (decoded for the removed-key rejection);

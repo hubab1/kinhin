@@ -137,7 +137,8 @@ public struct ProjectImageService: Sendable {
         let resolution = ProjectToolchainResolver.resolve(
             repository: repository, projects: config.projects, repoFile: file)
         if let warning = resolution.warning { Log.warn("images", warning) }
-        let builder = ProjectImageBuilder(tart: tart, store: store, baseImage: config.image, bake: bake)
+        let builder = ProjectImageBuilder(
+            tart: tart, store: store, baseImage: config.image, cachePolicy: config.toolchainCache, bake: bake)
         return (resolution, builder)
     }
 

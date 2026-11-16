@@ -21,11 +21,13 @@ public struct LinuxImageOptions {
     public var platform: LinuxPlatform
     /// Install Docker when the base image lacks it (`container.docker`).
     public var docker: Bool
+    /// Host cache-expiry policy; nil keeps the standard prune defaults.
+    public var cachePolicy: KinhinConfig.ToolchainCacheConfig?
 
     public init(
         image: String, target: String, user: String = "admin", toolchains: KinhinConfig.ToolchainsConfig? = nil,
         toolchainTimeout: TimeInterval = 1800, storedTokens: Set<ForgeID>? = nil,
-        platform: LinuxPlatform = .arm64, docker: Bool = false
+        platform: LinuxPlatform = .arm64, docker: Bool = false, cachePolicy: KinhinConfig.ToolchainCacheConfig? = nil
     ) {
         self.platform = platform
         self.docker = docker
@@ -35,6 +37,7 @@ public struct LinuxImageOptions {
         self.toolchains = toolchains
         self.toolchainTimeout = toolchainTimeout
         self.storedTokens = storedTokens
+        self.cachePolicy = cachePolicy
     }
 }
 
@@ -74,6 +77,13 @@ struct LinuxImageBaker: Sendable {
 
     let shell: ShellRunning
     let backend: Backend
+    let cacheRoot: URL
+
+    init(shell: ShellRunning, backend: Backend, cacheRoot: URL = Paths.toolchainCache) {
+        self.shell = shell
+        self.backend = backend
+        self.cacheRoot = cacheRoot
+    }
 
     func prepare(_ options: LinuxImageOptions, versions: RunnerVersionResolver.Versions) async throws -> String {
         let tag = backend.logTag
@@ -89,13 +99,14 @@ struct LinuxImageBaker: Sendable {
 
         // Cache upkeep: sweep stale entries before this bake writes through
         // the cache (noop unless age/size limits trip).
-        ToolchainCachePruner().prune(policy: ToolchainCachePolicy(from: nil), minInterval: 3600)
+        ToolchainCachePruner(cacheRoot: cacheRoot).prune(
+            policy: ToolchainCachePolicy(from: options.cachePolicy), minInterval: 3600)
 
         // Always bind-mount the host toolchain cache into the scratch
         // container: every prepare write-through (apt, mise, npm) lands in
         // one cache that later bakes and runner containers reuse.
         do {
-            try FileManager.default.createDirectory(at: Paths.toolchainCache, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
         } catch {
             Log.warn(tag, "could not create toolchain cache dir (\(error.localizedDescription)); continuing without it")
         }
@@ -112,7 +123,7 @@ struct LinuxImageBaker: Sendable {
             startArgv += ["--platform", options.platform.rawValue]
         }
         startArgv += [
-            "--volume", ToolchainCacheMount.volumeSpec(host: Paths.toolchainCache.path),
+            "--volume", ToolchainCacheMount.volumeSpec(host: cacheRoot.path),
             // POSIX sh, not bash: minimal non-Debian images (Alpine) have no bash,
             // and the apt-get check below should be what rejects them, clearly.
             "--name", scratch, options.image,

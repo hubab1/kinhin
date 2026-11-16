@@ -27,6 +27,7 @@ actor ProjectImageBuilder {
     private let store: ProjectImageStore
     /// The global image every derived image is cloned from.
     private let baseImage: String
+    private let cachePolicy: KinhinConfig.ToolchainCacheConfig?
     private let bake: Bake
     private let onBake: BakeObserver?
     private let now: @Sendable () -> Date
@@ -40,13 +41,15 @@ actor ProjectImageBuilder {
     private var tail: Task<Void, Never>?
 
     init(
-        tart: TartControlling, store: ProjectImageStore, baseImage: String, ssh: SSHExecuting = SSHExecutor(),
+        tart: TartControlling, store: ProjectImageStore, baseImage: String,
+        cachePolicy: KinhinConfig.ToolchainCacheConfig? = nil, ssh: SSHExecuting = SSHExecutor(),
         bake: Bake? = nil, onBake: BakeObserver? = nil, now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.onBake = onBake
         self.tart = tart
         self.store = store
         self.baseImage = baseImage
+        self.cachePolicy = cachePolicy
         self.now = now
         self.bake =
             bake ?? { options in
@@ -103,11 +106,12 @@ actor ProjectImageBuilder {
         let bake = self.bake
         let onBake = self.onBake
         let base = baseImage
+        let cachePolicy = self.cachePolicy
         tail = Task { [weak self] in
             await previous?.value
             var options = ImagePreparer.Options(
                 source: base, target: name, toolchains: toolchains, shareCache: shareCache,
-                cacheScope: shareCache ? key : nil)
+                cachePolicy: cachePolicy, cacheScope: shareCache ? key : nil)
             options.provisionScriptPath = nil
             let started = ContinuousClock.now
             func elapsed() -> Double { (ContinuousClock.now - started) / .seconds(1) }

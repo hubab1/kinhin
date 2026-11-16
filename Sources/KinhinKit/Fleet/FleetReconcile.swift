@@ -397,7 +397,23 @@ extension FleetEngine {
                 })
             input.defaultContainerPool = container.defaultPool.name
             input.containerBudget = routerState.containerBudget
-            input.exclude(containerPools: unpreparedContainerPools, demandByAccount: demand.byForgeContainerPool)
+            // A switched-off pool is left out like an unbuilt one: it admits no new instance (its running ones drain).
+            let switchedOff = Set(container.pools.filter { !$0.enabled }.map(\.name))
+            input.exclude(
+                containerPools: unpreparedContainerPools.union(switchedOff),
+                demandByAccount: demand.byForgeContainerPool)
+        }
+        if config.runtimes?.borrowIdleBudget == true {
+            let host = hostProbe()
+            input.resources = ScaleResourceBudget(
+                capacity: VMResourceReservation(
+                    cpu: max(0, host.logicalCores - config.reserve.cpu),
+                    memoryGB: max(0, host.memoryGB - config.reserve.memoryGB)),
+                shapes: Dictionary(
+                    uniqueKeysWithValues: RuntimeID.allCases.map {
+                        let shape = RuntimeCapacity.shape(of: $0, in: config)
+                        return ($0, VMResourceReservation(cpu: shape.cpu, memoryGB: shape.memoryGB))
+                    }))
         }
         return ScalePlan.make(input)
     }
@@ -405,6 +421,7 @@ extension FleetEngine {
     /// Warm instances to keep per Tart image: the base `warm_pool` ("") and each `images:` entry's own.
     func warmTargets(images: [KinhinConfig.ImageConfig]) -> [String: Int] {
         var targets: [String: Int] = [:]
+        guard config.tartEnabled else { return targets }  // a disabled Tart pool keeps no warm VMs
         if config.warmPool > 0 { targets[""] = config.warmPool }
         for image in images where image.warmPool > 0 { targets[image.name] = image.warmPool }
         return targets
@@ -464,6 +481,8 @@ extension FleetEngine {
             record.runtime = slot.runtime.rawValue
             record.image = slot.image
             record.pool = slot.pool
+            record.resourceReservation = VMResourceReservation.configured(
+                for: slot.runtime, in: config, containerPool: slot.pool)
             store.upsert(record)
             // The lifecycle waits its turn at the engine's `SpawnPacer`, so disk I/O does not
             // stampede; the pass itself never sleeps.
@@ -575,6 +594,7 @@ extension FleetEngine {
             record.runtime = RuntimeID.tart.rawValue
             record.image = slot.image
             record.pooled = true
+            record.resourceReservation = VMResourceReservation.configured(for: .tart, in: config)
             store.upsert(record)
             Log.info(record.id, "starting warm instance\(slot.image.map { " for \($0)" } ?? "")")
             spawnLifecycle(for: record)

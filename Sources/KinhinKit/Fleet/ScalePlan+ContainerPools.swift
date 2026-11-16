@@ -33,6 +33,11 @@ extension ScalePlan {
     static func containerUsage(records: [VMRecord], input: Input) -> RuntimeCapacity.Budget {
         var used = RuntimeCapacity.Budget(cpu: 0, memoryGB: 0)
         for record in records where pool(of: record, input: input) == .appleContainer {
+            if let allocation = record.resourceReservation, allocation.isValid {
+                used.cpu += allocation.cpu
+                used.memoryGB += allocation.memoryGB
+                continue
+            }
             guard let shape = input.containerPools[containerPool(of: record, input: input)] else { continue }
             used.cpu += shape.cpus
             used.memoryGB += shape.memoryGB
@@ -53,6 +58,9 @@ extension ScalePlan {
                 pool(of: $0, input: input) == .appleContainer && containerPool(of: $0, input: input) == name
             }
             if running >= max { return false }
+        }
+        guard resourceFits(runtime: .appleContainer, containerPool: name, records: records, input: input) else {
+            return false
         }
         guard let budget = input.containerBudget else { return true }
         let used = containerUsage(records: records, input: input)

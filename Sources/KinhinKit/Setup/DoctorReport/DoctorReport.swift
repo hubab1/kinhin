@@ -377,6 +377,9 @@ public struct DoctorReport: Codable, Equatable, Sendable {
     /// not checked — `auth` above only says whether one is stored. Any failed
     /// entry makes `ready` false.
     public let tokenChecks: [TokenCheck]?
+    /// Outbound alerts — present only when the config has `alerts.enabled: true`. A webhook that cannot work (no
+    /// token stored) makes `ready` false: the alerts that should reach you would silently not.
+    public let alerts: AlertsSection?
 
     public init(
         host: HostResources, clt: CLTSection, tart: TartSection, container: ContainerSection?,
@@ -385,8 +388,9 @@ public struct DoctorReport: Codable, Equatable, Sendable {
         auth: AuthStatusReport, checks: [SetupCheckResult], ready: Bool, capacity: CapacitySection?,
         tartBaseImage: TartBaseImageSection? = nil, security: SecuritySection? = nil,
         imageTotalGB: [String: Int]? = nil, imagePrune: ImagePruneSection? = nil,
-        diskPressure: DiskPressureSection? = nil, tokenChecks: [TokenCheck]? = nil
+        diskPressure: DiskPressureSection? = nil, tokenChecks: [TokenCheck]? = nil, alerts: AlertsSection? = nil
     ) {
+        self.alerts = alerts
         self.tokenChecks = tokenChecks
         self.host = host
         self.clt = clt
