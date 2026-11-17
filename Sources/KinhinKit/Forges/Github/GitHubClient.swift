@@ -9,6 +9,8 @@ public protocol GitHubServing: Sendable {
     var configureURL: String { get }
     func fetchRegistrationToken() async throws -> RegistrationToken
     func listRunners() async throws -> [GHRunner]
+    /// Bypass the short observation cache before retiring an idle runner.
+    func freshRunners() async throws -> [GHRunner]
     func deleteRunner(id: Int) async throws
     func queuedJobs(matching labels: Set<String>) async throws -> [QueuedJob]
     func runningJobs(matching labels: Set<String>) async throws -> [RunningJob]
@@ -34,6 +36,7 @@ public protocol GitHubServing: Sendable {
 }
 
 extension GitHubServing {
+    public func freshRunners() async throws -> [GHRunner] { try await listRunners() }
     public var rateLimit: ForgeRateLimit? { nil }
     public func pipelineDetail(runnerName: String) async throws -> PipelineDetail? { nil }
     public func jobLog(repository: String, jobID: Int) async throws -> String? { nil }
@@ -234,6 +237,10 @@ public struct GitHubClient: GitHubServing {
 
     public func listRunners() async throws -> [GHRunner] {
         try await runnerCache.elements(fetch: fetchRunners)
+    }
+
+    public func freshRunners() async throws -> [GHRunner] {
+        try await fetchRunners()
     }
 
     func fetchRunners() async throws -> [GHRunner] {

@@ -105,6 +105,10 @@ struct GitHubForge: Forge {
         try await client.listRunners().map { ForgeRunner(id: String($0.id), name: $0.name, busy: $0.busy) }
     }
 
+    func freshRunners() async throws -> [ForgeRunner] {
+        try await client.freshRunners().map { ForgeRunner(id: String($0.id), name: $0.name, busy: $0.busy) }
+    }
+
     func deleteRunner(id: String) async throws {
         try await client.deleteRunner(id: try numericRunnerID(id))
     }

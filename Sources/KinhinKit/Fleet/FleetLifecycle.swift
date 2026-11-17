@@ -311,6 +311,10 @@ extension FleetEngine {
         let registrationDeadline = Date().addingTimeInterval(
             max(TimeInterval(config.vmBootTimeout), watchdog.registrationGrace.timeInterval))
         var seen: Set<String> = []
+        // A deregistering runner which took a job stays occupied until that runner disappears. Track names,
+        // not just the VM phase: another indexed runner may still be registered and waiting for its first job.
+        var busyRunners: Set<String> =
+            store.all.first(where: { $0.id == id })?.phase == .busy ? Set(expected) : []
         // Runners that were ever listed, online or not. A runner that appeared
         // and then vanished completed its lifecycle even when no poll caught it
         // online (a short job finishes between two reads of the shared list).
@@ -395,11 +399,16 @@ extension FleetEngine {
             }
             if !mine.isEmpty {
                 if mine.contains(where: \.busy) {
+                    for runner in mine where runner.busy { busyRunners.insert(runner.name) }
                     idleSince = nil
                     updateRecord(id) { $0.phase = .busy }
                     noteJobPickedUp(id: id)
                 } else {
-                    updateRecord(id) { $0.phase = .ready }
+                    // Deregistering ephemeral runners remain busy until they disappear. GitHub can briefly
+                    // report busy=false while a job is still running; that must never make it idle surplus.
+                    if idleGrace != nil || !mine.contains(where: { busyRunners.contains($0.name) }) {
+                        updateRecord(id) { $0.phase = .ready }
+                    }
                     if let idleGrace, allSeen {
                         let since = idleSince ?? Date()
                         idleSince = since
@@ -505,6 +514,14 @@ extension FleetEngine {
     func deleteVMRecord(id: String, reason: String) async {
         guard deletes.withLock({ $0.inFlight.insert(id).inserted }) else { return }
         defer { deletes.withLock { _ = $0.inFlight.remove(id) } }
+        if reason == "scale down" {
+            do {
+                guard try await retireIdleRunnersForScaleDown(id) else { return }
+            } catch {
+                Log.warn(id, "holding scale-down: runner retirement failed (\(error.localizedDescription))")
+                return
+            }
+        }
         Log.info(id, "deleting VM (\(reason))")
         updateRecord(id) { $0.phase = .deleting }
         // Stop the instance's lifecycle — unless that lifecycle is the caller

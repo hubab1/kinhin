@@ -39,8 +39,7 @@ extension ScalePlan {
 
     /// True when some Tart image keeps a floor. Idle runners of one image must then not count as supply for another
     /// image's queued jobs (their labels differ, so the forge cannot hand them over), so the Tart pool's unmet demand
-    /// and the image a new slot clones are worked out per image. Off, the plan is exactly what it was before
-    /// `min_idle`.
+    /// is worked out per image. Image selection always excludes busy classic runners from queued-job coverage.
     static func imageAware(_ input: Input) -> Bool {
         input.minIdle.contains { $0.key.runtime == .tart && $0.value > 0 }
     }
@@ -97,7 +96,7 @@ extension ScalePlan {
     /// Whether `record` counts toward its image's demand when a slot picks the image to clone. With a Tart floor, a
     /// busy instance whose job left the queue serves none of it, so it must not steer the next slot to another image.
     static func servesImageDemand(_ record: VMRecord, input: Input) -> Bool {
-        !imageAware(input) || covers(record, includesRunning: input.includesRunning)
+        covers(record, includesRunning: input.includesRunning)
     }
 
     /// Whether scaling `pool` down from `remaining` to `without` leaves its queued jobs no worse served. Without a

@@ -22,6 +22,9 @@
 
 **Fixed**
 
+- Keep ephemeral runners busy until deregistration, bypass GitHub's observation cache before scale-down, and
+  require successful idle runner retirement before cancelling a watcher or stopping its VM.
+- Select a queued job's required project image even when a busy peer already uses it and all warm floors are off.
 - Preserve configured toolchain cache pruning policy during project, CLI and app-driven image preparation.
 
 - Assign mixed-runtime runners to accounts with demand for their selected runtime and named container pool.

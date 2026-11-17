@@ -39,6 +39,30 @@ final class GitHubClientCachingTests: XCTestCase {
         XCTAssertEqual(listCalls.withLock { $0 }, 1, "ten watch reads within the TTL must cost one request")
     }
 
+    func testFreshForgeRunnerReadBypassesTheClientsIdleSnapshot() async throws {
+        let reads = Locked(0)
+        StubProtocol.handler = { _ in
+            let busy = reads.withLock { count in
+                count += 1
+                return count > 1
+            }
+            return (
+                200,
+                Data(
+                    "{\"total_count\":1,\"runners\":[{\"id\":7,\"name\":\"kinhin-7\",\"status\":\"online\",\"busy\":\(busy),\"labels\":[]}]}"
+                        .utf8), [:]
+            )
+        }
+        let forge = GitHubForge(
+            credentials: .github(token: "test-token", scope: "acme/widgets"),
+            labels: ["kinhin"], client: makeClient(scope: "acme/widgets"))
+        let cached = try await forge.runners()
+        XCTAssertEqual(cached.first?.busy, false)
+        let fresh = try await forge.freshRunners()
+        XCTAssertEqual(fresh.first?.busy, true)
+        XCTAssertEqual(reads.withLock { $0 }, 2)
+    }
+
     func testDeletingARunnerRefreshesTheList() async throws {
         let deleted = Locked(false)
         StubProtocol.handler = { request in

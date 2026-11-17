@@ -30,4 +30,22 @@ extension FleetEngine {
             return false
         }
     }
+
+    /// Remove the idle registration before cancelling its watcher or touching the VM. Successful retirement
+    /// fences dispatch; a busy runner or any API rejection (including GitHub's 422) leaves both running.
+    func retireIdleRunnersForScaleDown(_ id: String) async throws -> Bool {
+        guard let record = store.all.first(where: { $0.id == id }), record.phase == .ready else { return false }
+        // An instance never bound to an account has no registration to retire.
+        guard let account = record.platform else { return true }
+        guard let forge = forgeState.withLock({ $0.byPlatform[account] }) else { return false }
+        let expected = Self.runnerNames(for: id, count: config.runnersPerVM)
+        let runners = try await observedRunners(of: forge, expected: expected, fresh: true)
+        if runners.contains(where: \.busy) {
+            updateRecord(id) { $0.phase = .busy }
+            return false
+        }
+        guard store.all.first(where: { $0.id == id })?.phase == .ready else { return false }
+        for runner in runners { try await forge.deleteRunner(id: runner.id) }
+        return true
+    }
 }
