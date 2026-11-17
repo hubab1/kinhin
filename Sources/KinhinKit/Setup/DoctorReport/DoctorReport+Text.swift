@@ -85,7 +85,24 @@ extension DoctorReport {
             // Decimal units, like the rest of the report; `%` formats ignore the locale, so the text is stable.
             bytes >= 1_000_000_000 ? String(format: "%.1f GB", Double(bytes) / 1e9) : "\(bytes / 1_000_000) MB"
         }
-        return line + " · \(size ?? "nothing") cached in \(cache.dataDirectory)"
+        line += " · \(size ?? "nothing") cached in \(cache.dataDirectory)"
+        if let ttl = cache.ttl ?? cache.wantedTTL {
+            line += " · TTL \(ttl == "0h" ? "off (nothing expires)" : ttl)"
+            if let wanted = cache.wantedTTL, let running = cache.ttl, wanted != running {
+                line += " (config: \(wanted), applied at the cache's next start)"
+            }
+        }
+        if let broken = cache.brokenEntries, broken > 0 {
+            let shown = cache.brokenExamples ?? []
+            let more = broken > shown.count ? " (+\(broken - shown.count) more)" : ""
+            let examples = shown.joined(separator: ", ") + more
+            line +=
+                " · UNHEALTHY: \(broken) broken entr\(broken == 1 ? "y" : "ies") (pulls of them fail with "
+                + "unexpected EOF; the next Docker runner deletes them so they are fetched again): \(examples) ✗"
+        } else if cache.brokenEntries != nil {
+            line += " · entries intact ✓"
+        }
+        return line
     }
 
     /// The report as aligned "label: value" lines (no trailing newline).
@@ -137,6 +154,10 @@ extension DoctorReport {
                 )
             }
             if let cache = container.registryCache { row("cont cache", Self.registryCacheLine(cache)) }
+            if let install = container.install {
+                row("cont from", install.summaryLine)
+                if let warning = install.warning ?? install.note { more("⚠ \(warning)") }
+            }
         }
         if let docker {
             row("docker", docker.ok ? "ready ✓ (\(docker.platform))" : docker.fix ?? "✗")
@@ -242,6 +263,18 @@ extension DoctorReport {
                     if index == 0 { row(label, line) } else { more(line) }
                     if let fix = webhook.fix { more(fix) }
                 }
+            }
+        }
+        if let storage {
+            for (index, entry) in storage.paths.enumerated() {
+                let label = index == 0 ? "storage" : ""
+                let volume = entry.mountPoint.map { " on \($0)" } ?? ""
+                let line =
+                    entry.ok
+                    ? "\(entry.key) \(entry.path)\(volume) ✓"
+                    : "\(entry.key) \(entry.path) NOT READY ✗ — \(entry.problem ?? "not usable")"
+                if index == 0 { row(label, line) } else { more(line) }
+                if let fix = entry.fix { more(fix) }
             }
         }
         if let base = tartBaseImage {

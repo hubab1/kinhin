@@ -40,7 +40,23 @@ class CacheSlotPreparationTests(unittest.TestCase):
         self.assertEqual((self.source / 'build.db').read_text(), 'original build state')
         self.assertFalse((stage / 'slot-0/ci-storage-v1').exists())
         manifest = json.loads((stage / 'manifest.json').read_text())
+        self.assertNotIn('kinhin-ci-tools', manifest['sharedDirectories'])
+
+    def test_simulator_tools_are_an_explicit_read_only_opt_in(self):
+        (self.source / 'ci-tools-v1').mkdir()
+        stage = prepare.seed_slots(self.source, self.target, 'p-test',
+                                   shared={**prepare.SHARED, **prepare.SIMULATOR_TOOLS})
+        self.addCleanup(lambda: shutil.rmtree(stage) if stage.exists() else None)
+        manifest = json.loads((stage / 'manifest.json').read_text())
         self.assertTrue(manifest['sharedDirectories']['kinhin-ci-tools']['readOnly'])
+        self.assertFalse((stage / 'slot-0/ci-tools-v1').exists())
+
+    def test_unused_tool_bundles_are_not_copied_into_writable_private_slots(self):
+        (self.source / 'ci-tools-v1').mkdir()
+        (self.source / 'ci-tools-v1/simslim').write_text('pinned tool')
+        stage = self.seed()
+        self.assertFalse((stage / 'slot-0/ci-tools-v1').exists())
+        self.assertFalse((stage / 'slot-1/ci-tools-v1').exists())
 
     def test_absolute_links_to_the_seed_become_slot_relative_links(self):
         (self.source / 'current').symlink_to(self.source / 'build.db')

@@ -292,6 +292,24 @@ With a GitHub scale set (`scale_set:`), keep `runners_per_vm: 1`: GitHub does no
 runner in the same VM, and the scaler counts those slots as capacity, so the job waits for the first one to finish
 ([details](forges/github.md#a-second-job-stays-queued-while-the-vm-has-idle-runners-runners-per-vm-1)).
 
+## Simulator memory in the CI fork
+
+The CI fork keeps upstream's Docker registry repair, isolated Docker build-cache volumes and configurable storage
+paths. Its remaining engine additions address separate concerns: single-writer writable Mac build caches,
+mixed-runtime resource borrowing, account/image-aware admission and additional busy-runner teardown protections.
+Two concurrent macOS VMs are already supported upstream; simulator trimming does not enable that capability.
+
+SimSlim stays an external, pinned workflow tool. The engine does not need to know about it. The conservative
+`native-ci` profile preserves the features exercised by Remind and Utter, including widgets, Screen Time,
+speech, StoreKit, keychain and iCloud. Removing unused simulator services can leave more of each guest's memory
+available to the app and test runner, but does not change the configured 6 GiB VM allocation or reduce the memory
+used by macOS and the Xcode compiler. Upstream's aggressive-profile memory figures do not describe this profile.
+
+The [profile and paired measurement procedure](https://github.com/hubab1/kinhin/tree/codex/simslim-dual-mac/ci/simslim)
+record simulator process-tree physical footprint, capability checks and preparation time. Keep warm pools off,
+Linux scaled to zero when idle, and UI tests blocking. Judge this integration by measured memory savings and
+complete workflow duration, rather than the number of disabled services alone.
+
 ## Running on multiple Macs
 
 Each Mac runs its own engine and polls the forge independently; kinhin does not coordinate between

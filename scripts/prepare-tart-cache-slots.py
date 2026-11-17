@@ -15,8 +15,8 @@ import stat
 import subprocess
 import tempfile
 
-SHARED = {'kinhin-ci-storage': {'path': 'ci-storage-v1', 'readOnly': False},
-          'kinhin-ci-tools': {'path': 'ci-tools-v1', 'readOnly': True}}
+SHARED = {'kinhin-ci-storage': {'path': 'ci-storage-v1', 'readOnly': False}}
+SIMULATOR_TOOLS = {'kinhin-ci-tools': {'path': 'ci-tools-v1', 'readOnly': True}}
 
 
 def unlinked(path):
@@ -84,7 +84,8 @@ def seed_slots(source, target, scope, shared=SHARED):
         raise RuntimeError('The cache source and slot root must be separate')
     stage = Path(tempfile.mkdtemp(prefix='.' + scope + '-preparing-', dir=target.parent))
     try:
-        excluded = {entry['path'] for entry in shared.values()}
+        # Optional tools stay outside private writable caches even when they are not mounted.
+        excluded = {entry['path'] for entry in {**SHARED, **SIMULATOR_TOOLS, **shared}.values()}
         for index in range(2):
             slot = stage / ('slot-' + str(index))
             slot.mkdir(mode=0o700)
@@ -135,6 +136,8 @@ def require_stopped(source=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scope', required=True)
+    parser.add_argument('--simulator-tools', action='store_true',
+                        help='Opt into the pinned SimSlim workflow tool mount; omitted by default')
     parser.add_argument('--support-dir', type=Path,
                         default=Path.home() / 'Library/Application Support/Kinhin')
     args = parser.parse_args()
@@ -150,7 +153,8 @@ def main():
         if shutil.disk_usage(root).free < 20 * 1024 ** 3:
             raise RuntimeError('Keep at least 20 GiB free before preparing caches')
         target = root / args.scope
-        stage = seed_slots(support / 'toolchain-cache' / args.scope, target, args.scope)
+        shared = {**SHARED, **SIMULATOR_TOOLS} if args.simulator_tools else SHARED
+        stage = seed_slots(support / 'toolchain-cache' / args.scope, target, args.scope, shared=shared)
         try:
             require_stopped(support / 'toolchain-cache' / args.scope)  # Refuse publication if someone resumed during the copy.
             stage.rename(target)
