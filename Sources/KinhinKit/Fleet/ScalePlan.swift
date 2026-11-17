@@ -59,6 +59,8 @@ struct ScalePlan: Equatable {
         var warmMaxAge: TimeInterval = 3600
         /// Queued Tart jobs per named or derived image; the base image takes the rest of the Tart demand.
         var imageDemand: [String: Int] = [:]
+        /// Image demand per account, so another repository's idle image cannot cover this account's jobs.
+        var imageDemandByAccount: [String: [String: Int]] = [:]
         /// Registered, idle instances to keep per pool and per Tart image (`min_idle`). Absent or 0 = off.
         var minIdle: [IdleKey: Int] = [:]
         /// Queued Apple container jobs per named container pool (`ScalePlan+ContainerPools`).
@@ -145,9 +147,13 @@ struct ScalePlan: Equatable {
         plan.target += idle.count
         applyWarm(warm, to: &plan, live: active.count, inFlight: pooledInFlight, cap: cap, input: input)
 
-        if active.count > desired {
+        // A ready runner bound to another account can block every slot while satisfying none of the queue.
+        // Retire idle capacity that leaves coverage unchanged, even when the global target is already full.
+        let blocked = !unmet.isEmpty && plan.slots.isEmpty
+        let removalLimit = max(active.count - desired, blocked ? active.count - input.minRunners : 0)
+        if removalLimit > 0 {
             if input.failedForges.isEmpty {
-                plan.scaleDown = scaleDown(active: active, surplus: active.count - desired, input: input)
+                plan.scaleDown = scaleDown(active: active, surplus: removalLimit, input: input)
             } else {
                 plan.scaleDownHeld = true
             }
@@ -262,28 +268,26 @@ struct ScalePlan: Equatable {
         record.runtimeID ?? input.defaultRuntime
     }
 
-    /// Unmet instances per pool: for each demand kind (queued-only, or
-    /// including running) the instances its jobs need minus the instances of
-    /// that kind that can serve them.
+    /// Unmet instances per pool and account. A runner registered to one repository cannot serve another's queue.
     static func unmetByPool(records: [VMRecord], input: Input) -> [RuntimeID: Int] {
         let rpv = max(1, input.runnersPerVM)
-        var jobs: [RuntimeID: [Bool: Int]] = [:]  // pool → includesRunning → jobs
+        var jobs: [RuntimeID: [String: Int]] = [:]  // pool → account → jobs
         for (account, pools) in input.demand {
-            let kind = input.includesRunning.contains(account)
-            for (pool, count) in pools where count > 0 { jobs[pool, default: [:]][kind, default: 0] += count }
+            for (pool, count) in pools where count > 0 { jobs[pool, default: [:]][account, default: 0] += count }
         }
-        var supply: [RuntimeID: [Bool: Int]] = [:]
+        var supply: [RuntimeID: [String: Int]] = [:]
         for record in records {
-            let kind = input.includesRunning.contains(record.platform ?? "")
-            guard covers(record, includesRunning: input.includesRunning) else { continue }
-            supply[pool(of: record, input: input), default: [:]][kind, default: 0] += 1
+            guard let account = record.platform, covers(record, includesRunning: input.includesRunning) else {
+                continue
+            }
+            supply[pool(of: record, input: input), default: [:]][account, default: 0] += 1
         }
         var result: [RuntimeID: Int] = [:]
-        for (pool, byKind) in jobs {
+        for (pool, byAccount) in jobs {
             var unmet = 0
-            for (kind, count) in byKind {
+            for (account, count) in byAccount {
                 let wanted = Int(ceil(Double(count) / Double(rpv)))
-                unmet += max(0, wanted - (supply[pool]?[kind] ?? 0))
+                unmet += max(0, wanted - (supply[pool]?[account] ?? 0))
             }
             if unmet > 0 { result[pool] = unmet }
         }
@@ -333,16 +337,6 @@ struct ScalePlan: Equatable {
             if input.heldRuntimes.contains(chosen) { break }  // every pool with demand is backing off
             if exhausted.contains(chosen) { break }  // the fallback runtime is out of room
 
-            // The image for a Tart slot, counting only instances that serve demand (warm ones do not).
-            var image: String?
-            if chosen == .tart {
-                var served: [String: Int] = [:]
-                for record in sim
-                where pool(of: record, input: input) == .tart && servesImageDemand(record, input: input) {
-                    served[record.image ?? "", default: 0] += 1
-                }
-                image = chooseImage(queuedTart: queuedTart, byImage: input.imageDemand, active: served)
-            }
             // The named container pool for an Apple container slot; none fits: try the other runtimes.
             var pool: String?
             if chosen == .appleContainer, !input.containerPools.isEmpty {
@@ -372,6 +366,9 @@ struct ScalePlan: Equatable {
                 if let account = record.platform { coverage[account, default: 0] += 1 }
             }
             let account = ForgeDemand.assignAccount(demand: demand, active: coverage, attached: candidates)
+            let image =
+                chosen == .tart
+                ? imageForAccount(account, queuedTart: queuedTart, records: sim, input: input) : nil
             out.append(Slot(account: account, runtime: chosen, image: image, pool: pool))
             sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)", input: input))
         }

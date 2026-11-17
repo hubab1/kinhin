@@ -22,6 +22,7 @@
 
 **Fixed**
 
+- Count queued-job coverage and select images per forge account; retire idle wrong-account capacity when it blocks jobs.
 - Keep ephemeral runners busy until deregistration, bypass GitHub's observation cache before scale-down, and
   require successful idle runner retirement before cancelling a watcher or stopping its VM.
 - Select a queued job's required project image even when a busy peer already uses it and all warm floors are off.

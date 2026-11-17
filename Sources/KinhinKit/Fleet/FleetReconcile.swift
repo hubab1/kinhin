@@ -235,6 +235,7 @@ extension FleetEngine {
         var includesRunning: Set<String> = []
         /// Queued tart jobs served by a ready derived per-project image.
         var byImage: [String: Int] = [:]
+        var byForgeImage: [String: [String: Int]] = [:]
         /// Queued Apple container jobs per named container pool (empty without `container.pools:`).
         var byContainerPool: [String: Int] = [:]
         /// The same jobs per account and named container pool.
@@ -310,6 +311,7 @@ extension FleetEngine {
                     demand.byPool[poolID, default: 0] += count
                 }
                 for (image, count) in projectDemand.byImage { demand.byImage[image, default: 0] += count }
+                demand.byForgeImage[forge.account] = projectDemand.byImage
                 let containerPools = routerState.model.demandByContainerPool(for: jobs)
                 if !containerPools.isEmpty { demand.byForgeContainerPool[forge.account] = containerPools }
                 for (pool, count) in containerPools {
@@ -387,6 +389,7 @@ extension FleetEngine {
             warmPool: warmTargets(images: routerState.images),
             warmMaxAge: TimeInterval(config.warmMaxAgeMinutes) * 60, imageDemand: demand.byImage,
             minIdle: minIdleTargets(images: routerState.images, unprepared: unpreparedIdleImages))
+        input.imageDemandByAccount = demand.byForgeImage
         // Named container pools: their demand, shapes and the budget they share (none without `pools:`).
         if let container = config.container, !container.pools.isEmpty {
             input.containerPoolDemand = demand.byContainerPool

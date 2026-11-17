@@ -99,17 +99,12 @@ extension ScalePlan {
         covers(record, includesRunning: input.includesRunning)
     }
 
-    /// Whether scaling `pool` down from `remaining` to `without` leaves its queued jobs no worse served. Without a
-    /// Tart floor that means none of them unmet, as before. With one, the Tart pool's demand is per image: an idle
-    /// runner of one image does not serve another image's waiting job, so removing it may go ahead while that job
-    /// waits, and frees its slot for the job.
+    /// Whether removing idle capacity leaves queued jobs no worse served. An idle runner bound to the wrong
+    /// account or image may be retired while those jobs wait, freeing a slot for a runner that can serve them.
     static func removalKeepsDemand(
         of pool: RuntimeID, remaining: [VMRecord], without: [VMRecord], input: Input
     ) -> Bool {
         let after = unmetByPool(records: without, input: input)[pool]
-        guard imageAware(input) || (pool == .appleContainer && !input.containerPools.isEmpty) else {
-            return after == nil
-        }
         return (after ?? 0) <= (unmetByPool(records: remaining, input: input)[pool] ?? 0)
     }
 
