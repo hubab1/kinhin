@@ -4,12 +4,25 @@
 
 <!-- changelog: entries for the next release go here -->
 
+**Changed**
+
+- The app's window is one sidebar (Fleet, Runtimes, Accounts, Toolchains, Diagnostics, Settings) instead of Fleet and
+  Advanced tabs. Logs, Diagnostics, Benchmarks and Containers are panes of Diagnostics, and **Support kinhin** moved to the
+  sidebar footer. The menu bar's **Settings…** now opens Settings, and **Open Logs** opens Diagnostics → Logs. See
+  [the app](docs/app.md).
+- Diagnostics and Settings follow the new design: Health has a **Re-check** button, and Settings has one **Support kinhin** card.
+- Every `min_idle` floor (`image_min_idle`, `images[].min_idle`, `container.min_idle`, each container pool's and
+  `docker.min_idle`) now applies on a config reload without restarting the engine. Adding or removing a pool,
+  switching a pool or runtime on or off, or changing a pool's `max` still rebuilds the engine.
+
 **Added**
 
 - Add opt-in on-demand Tart borrowing of idle runtime capacity, with persisted per-instance CPU/RAM reservations,
   bounded combined admission and reserved-share priority for queued Linux work.
 - Preserve exact fractional runtime budget weights when editing routes, avoiding a rounded-down Linux memory share.
-
+- The Runtimes page is rebuilt: fleet capacity, the split, a card per runtime and the routes in one place, with a pinned
+  Apply bar. Every runtime has a **Keep idle** floor (`min_idle`) that is checked before Apply and takes effect without
+  restarting the fleet. See [the app](docs/app.md).
 - Pools have an on/off switch. `enabled: false` on `container:`, a `container.pools` entry or `docker:`, and
   `runtimes.tart.enabled: false`, keep a pool's settings but take it out of routing, scheduling and the Fleet page;
   running instances drain. In Advanced → Routing each pool card has the switch. See
@@ -55,7 +68,6 @@
   require successful idle runner retirement before cancelling a watcher or stopping its VM.
 - Select a queued job's required project image even when a busy peer already uses it and all warm floors are off.
 - Preserve configured toolchain cache pruning policy during project, CLI and app-driven image preparation.
-
 - Assign mixed-runtime runners to accounts with demand for their selected runtime and named container pool.
 - Honor an explicit `disk_gb` footprint when admitting named and derived Tart images, while retaining the disk reserve.
 
