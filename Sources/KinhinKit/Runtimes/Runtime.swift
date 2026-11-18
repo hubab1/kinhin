@@ -55,10 +55,12 @@ public struct RepoRoute: Sendable, Equatable {
     let toolchains: KinhinConfig.ToolchainsConfig?
     /// The project image key scoping the cache share (nil = the whole cache).
     let cacheScope: String?
+    /// Two independently seeded cache roots for concurrent Tart runners.
+    let cacheIsolationSlots: Int
 
     public init(
         repo: String, image: String, ephemeral: Bool, bootTimeout: Int, cacheMount: Bool = false,
-        toolchains: KinhinConfig.ToolchainsConfig? = nil, cacheScope: String? = nil
+        toolchains: KinhinConfig.ToolchainsConfig? = nil, cacheScope: String? = nil, cacheIsolationSlots: Int = 0
     ) {
         self.repo = repo
         self.image = image
@@ -67,6 +69,7 @@ public struct RepoRoute: Sendable, Equatable {
         self.cacheMount = cacheMount
         self.toolchains = toolchains
         self.cacheScope = cacheScope
+        self.cacheIsolationSlots = cacheIsolationSlots
     }
 
     /// The route for a runner: the fleet's base image, or the derived
@@ -82,7 +85,8 @@ public struct RepoRoute: Sendable, Equatable {
             bootTimeout: config.vmBootTimeout,
             cacheMount: cacheMount,
             toolchains: toolchains,
-            cacheScope: cacheScope
+            cacheScope: cacheScope,
+            cacheIsolationSlots: cacheMount && config.runtimes?.isolatedTartCache == true ? 2 : 0
         )
     }
 }
@@ -274,7 +278,7 @@ struct TartRuntime: Runtime {
             // Teardown only cancels this task without waiting for it, so a VM
             // whose stop lands in this window must not be started again.
             try Task.checkCancellation()
-            let mounts = route.cacheMount ? [ToolchainCacheMount.tartDirectorySpec(scope: route.cacheScope)] : []
+            let mounts = try await cacheMounts(id: id, route: route)
             try await tart.run(name: id, mounts: mounts)
             return
         }
@@ -285,7 +289,7 @@ struct TartRuntime: Runtime {
         // `tart.run`, the fresh clone stays a stopped VM for teardown's stop
         // instead of outliving it.
         try Task.checkCancellation()
-        let mounts = route.cacheMount ? [ToolchainCacheMount.tartDirectorySpec(scope: route.cacheScope)] : []
+        let mounts = try await cacheMounts(id: id, route: route)
         try await tart.run(name: id, mounts: mounts)
     }
 
@@ -410,7 +414,10 @@ struct TartRuntime: Runtime {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            if Self.vmIsGone(error) { return }
+            if Self.vmIsGone(error) {
+                try await releaseCacheSlot(id: id)
+                return
+            }
             Log.warn(id, "stopping VM failed: \(error.localizedDescription)")
         }
         do {
@@ -418,10 +425,14 @@ struct TartRuntime: Runtime {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            if Self.vmIsGone(error) { return }
+            if Self.vmIsGone(error) {
+                try await releaseCacheSlot(id: id)
+                return
+            }
             Log.warn(id, "deleting VM failed: \(error.localizedDescription)")
             throw error
         }
+        try await releaseCacheSlot(id: id)
     }
 
     /// Whether a tart failure means the VM does not exist (nothing to tear down).

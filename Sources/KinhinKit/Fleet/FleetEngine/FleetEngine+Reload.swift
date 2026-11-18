@@ -16,6 +16,8 @@ extension FleetEngine {
     public static func restartRequired(from old: KinhinConfig, to new: KinhinConfig) -> Bool {
         // The Tart switch lives in `runtimes:` but feeds the frozen config's warm and `min_idle` floors.
         if old.tartEnabled != new.tartEnabled { return true }
+        // Cache mounts are chosen from the engine configuration when a guest boots.
+        if (old.runtimes?.isolatedTartCache ?? false) != (new.runtimes?.isolatedTartCache ?? false) { return true }
         var a = old
         var b = new
         a.runtimes = nil
