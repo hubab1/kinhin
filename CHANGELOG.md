@@ -14,6 +14,9 @@
 
 **Added**
 
+- Add optional single-writer, persistent Tart build caches for concurrent macOS CI jobs. See
+  [Toolchains](docs/toolchains.md#isolated-writable-tart-build-caches).
+
 - The Runtimes page is rebuilt: fleet capacity, the split, a card per runtime and the routes in one place, with a pinned
   Apply bar. Every runtime has a **Keep idle** floor (`min_idle`) that is checked before Apply and takes effect without
   restarting the fleet. See [the app](docs/app.md).

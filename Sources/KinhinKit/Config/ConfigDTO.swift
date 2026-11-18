@@ -198,9 +198,11 @@ public struct PartialConfig: Decodable {
     /// `runtimes.tart:` — the Tart VM pool's on/off switch.
     struct PartialRuntimeTart: Decodable {
         var enabled: Bool?
+        var isolatedCache: Bool?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
             case enabled
+            case isolatedCache = "isolated_cache"
         }
     }
 

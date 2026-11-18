@@ -50,6 +50,34 @@ provision_script: "~/kinhin/provision.sh"
 - The script has its own 30-minute budget. A configured script that is missing or empty fails the setup checklist
   before a long prepare starts.
 
+## Isolated writable Tart build caches
+
+Set `runtimes.tart.isolated_cache: true` for concurrent macOS Tart jobs that use
+`projects[].share_cache: true` with a prepared, scoped project image. The setting
+is off by default. Each VM gets one writable cache at the existing `kinhin-cache`
+mount, and its files persist for a later VM. Each slot has one owner at a time.
+The engine stores its lease outside the guest mount until Tart confirms deletion.
+If every slot is occupied or its owner cannot be verified, startup fails with an
+error and does not share a writable cache with another VM.
+
+Prepare the two slots offline after draining and stopping the fleet. Use the
+project image's cache key from `kinhin toolchains list-images` as `--scope`. The
+existing scoped host cache is the seed. The preparation script clones files on
+APFS and places the slots beside the configured toolchain cache. Supply
+`--cache-root` for `toolchain_cache_path` and set `TART_HOME` in the shell if the
+fleet uses a custom Tart home. Use `python3 scripts/prepare-tart-cache-slots.py
+--scope KEY`. Preparation refuses to overwrite existing slots.
+
+Jobs can opt to place their build outputs or dependencies under the mount. Keep
+writable caches for jobs you trust alike. Normal project and fork-PR cache
+eligibility still applies. Slots have separate files, so a warm entry in one
+slot may take another build to populate in the other. Monitor disk use and
+refresh or discard a slot only while the fleet is drained. The existing shared
+cache pruning policy applies to the seed/download cache. Manage slot retention
+separately to avoid deleting active build files.
+
+GitHub cache and artifact actions continue to use their configured services.
+
 ## Per-project toolchains
 
 Declare what a project needs and kinhin installs, pins and verifies it. Each distinct set is baked into its own
