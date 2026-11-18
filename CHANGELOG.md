@@ -14,6 +14,9 @@
 
 **Added**
 
+- Opt-in idle capacity borrowing lets Tart use spare CPU and RAM from other runtime pools. Queued work for those pools
+  gets priority as slots become free. See [Scaling](docs/scaling.md#borrowing-idle-tart-capacity).
+
 - The Runtimes page is rebuilt: fleet capacity, the split, a card per runtime and the routes in one place, with a pinned
   Apply bar. Every runtime has a **Keep idle** floor (`min_idle`) that is checked before Apply and takes effect without
   restarting the fleet. See [the app](docs/app.md).

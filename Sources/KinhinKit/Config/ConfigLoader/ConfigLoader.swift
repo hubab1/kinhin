@@ -103,6 +103,7 @@ public struct ConfigLoader {
         try validateHostScopes(cfg)
         try validateEphemeralForges(cfg)
         try validateMinIdle(cfg)
+        try validateIdleBorrowing(cfg)
         return cfg
     }
 

@@ -157,12 +157,15 @@ extension ScalePlan {
     }
 
     /// The record a planned slot becomes, for counting what the plan already covers.
-    static func simulated(_ slot: Slot, id: String) -> VMRecord {
+    static func simulated(_ slot: Slot, id: String, input: Input? = nil) -> VMRecord {
         var record = VMRecord(id: id, phase: .cloning)
         record.platform = slot.account
         record.runtimeID = slot.runtime
         record.image = slot.image
         record.pool = slot.pool
+        record.resourceReservation = input.flatMap {
+            reservation(runtime: slot.runtime, containerPool: slot.pool, input: $0)
+        }
         return record
     }
 }

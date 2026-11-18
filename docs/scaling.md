@@ -27,6 +27,37 @@ counted with the smallest pool's CPU and memory, an upper bound, and each runner
 `cpus` and `memory_gb` against what the running containers leave of Apple container's CPU and RAM, and by its pool's
 `max:`. One pool, or none, keeps exactly the numbers above.
 
+### Borrowing idle Tart capacity
+
+For an on-demand mixed fleet, `runtimes.borrow_idle_budget: true` lets the default Tart pool use otherwise
+idle CPU and RAM shares. It is off by default. Other runtimes retain their original partition caps; their queued
+work gets its share back at the next free slot, without preempting a busy VM.
+
+For example, an 8-core, 16 GiB Mac with a 4 GiB host reserve can admit two 4-CPU, 6 GiB Tart VMs while Linux is idle,
+or one such Mac VM alongside a 2-CPU, 4 GiB Linux runner. The combined configured allocations must fit the host
+budget; per-runtime maxima are not a promise that every pool can run at its maximum simultaneously.
+
+```yaml
+max_runners: 2
+min_runners: 0
+warm_pool: 0
+image_min_idle: 0
+vm: {cpu: 4, memory_gb: 6}
+reserve: {cpu: 0, memory_gb: 4, disk_gb: 20}
+runtimes:
+  default: tart
+  budget: {appleContainer: 0.3333333333333334}
+  borrow_idle_budget: true
+```
+
+Keep the Linux image and pool configuration as usual, with all `min_idle` floors at zero. Borrowing requires
+`default: tart`, another isolated runtime, no host routes, and all warm and idle floors off. At most two Tart
+instances are admitted in this mode. Every instance keeps its original CPU/RAM reservation through teardown;
+changing the config cannot shrink a live VM on paper. An adopted or legacy instance with no known allocation
+holds the budget until it is removed. Changing the borrowing option rebuilds the engine; drain the fleet first.
+
+If concurrent jobs use writable native build caches, give each instance an exclusive cache before enabling borrowing.
+
 ## The scaling loop
 
 Every `poll_interval` seconds the engine:
