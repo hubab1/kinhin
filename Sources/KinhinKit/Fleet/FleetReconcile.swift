@@ -390,6 +390,7 @@ extension FleetEngine {
         // Named container pools: their demand, shapes and the budget they share (none without `pools:`).
         if let container = config.container, !container.pools.isEmpty {
             input.containerPoolDemand = demand.byContainerPool
+            input.containerPoolDemandByAccount = demand.byForgeContainerPool
             input.containerPools = Dictionary(
                 uniqueKeysWithValues: container.pools.map {
                     ($0.name, ScalePlan.ContainerPoolShape(cpus: $0.cpus, memoryGB: $0.memoryGB, max: $0.max))
@@ -401,6 +402,18 @@ extension FleetEngine {
             input.exclude(
                 containerPools: unpreparedContainerPools.union(switchedOff),
                 demandByAccount: demand.byForgeContainerPool)
+        }
+        if config.runtimes?.borrowIdleBudget == true {
+            let host = hostProbe()
+            input.resources = ScaleResourceBudget(
+                capacity: VMResourceReservation(
+                    cpu: max(0, host.logicalCores - config.reserve.cpu),
+                    memoryGB: max(0, host.memoryGB - config.reserve.memoryGB)),
+                shapes: Dictionary(
+                    uniqueKeysWithValues: RuntimeID.allCases.map {
+                        let shape = RuntimeCapacity.shape(of: $0, in: config)
+                        return ($0, VMResourceReservation(cpu: shape.cpu, memoryGB: shape.memoryGB))
+                    }))
         }
         return ScalePlan.make(input)
     }
@@ -468,6 +481,8 @@ extension FleetEngine {
             record.runtime = slot.runtime.rawValue
             record.image = slot.image
             record.pool = slot.pool
+            record.resourceReservation = VMResourceReservation.configured(
+                for: slot.runtime, in: config, containerPool: slot.pool)
             store.upsert(record)
             // The lifecycle waits its turn at the engine's `SpawnPacer`, so disk I/O does not
             // stampede; the pass itself never sleeps.
@@ -580,6 +595,7 @@ extension FleetEngine {
             record.runtime = RuntimeID.tart.rawValue
             record.image = slot.image
             record.pooled = true
+            record.resourceReservation = VMResourceReservation.configured(for: .tart, in: config)
             store.upsert(record)
             Log.info(record.id, "starting warm instance\(slot.image.map { " for \($0)" } ?? "")")
             spawnLifecycle(for: record)

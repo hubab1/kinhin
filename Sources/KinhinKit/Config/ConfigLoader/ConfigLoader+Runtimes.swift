@@ -92,8 +92,26 @@ extension ConfigLoader {
             defaultRuntime: defaultRuntime,
             budget: budget,
             routes: routes,
-            tartEnabled: tartEnabled
+            tartEnabled: tartEnabled, borrowIdleBudget: runtimes.borrowIdleBudget ?? false
         )
+    }
+
+    static func validateIdleBorrowing(_ config: KinhinConfig) throws {
+        guard config.runtimes?.borrowIdleBudget == true else { return }
+        guard config.runtimes?.defaultRuntime == .tart, !config.hostRoutesConfigured,
+            config.container != nil || config.docker != nil
+        else {
+            throw ConfigError.invalid("runtimes.borrow_idle_budget requires default: tart and another isolated runtime")
+        }
+        guard config.minRunners == 0, config.warmPool == 0, config.imageMinIdle == 0,
+            config.images.allSatisfy({ $0.warmPool == 0 && $0.minIdle == 0 }),
+            (config.container?.minIdle ?? 0) == 0,
+            (config.container?.pools ?? []).allSatisfy({ $0.minIdle == 0 }),
+            (config.docker?.minIdle ?? 0) == 0
+        else {
+            throw ConfigError.invalid(
+                "runtimes.borrow_idle_budget requires all warm, min_runners and min_idle floors off")
+        }
     }
 
     /// A route whose runtime name has not yet been checked against `RuntimeID`.

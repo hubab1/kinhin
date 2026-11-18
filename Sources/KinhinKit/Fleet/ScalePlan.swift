@@ -45,6 +45,8 @@ struct ScalePlan: Equatable {
         var capacityCap: Int
         /// Per-runtime partition caps; a runtime with no entry is uncapped.
         var poolCaps: [RuntimeID: Int] = [:]
+        /// Combined CPU/RAM admission, nil for legacy fixed partitions.
+        var resources: ScaleResourceBudget? = nil
         /// Runtimes backing off after repeated start failures.
         var heldRuntimes: Set<RuntimeID> = []
         /// Runtimes that have a configured pool.
@@ -61,6 +63,9 @@ struct ScalePlan: Equatable {
         var minIdle: [IdleKey: Int] = [:]
         /// Queued Apple container jobs per named container pool (`ScalePlan+ContainerPools`).
         var containerPoolDemand: [String: Int] = [:]
+        /// The same named-pool demand by account, so a pool cannot register its
+        /// runner in another account that has no jobs that pool can execute.
+        var containerPoolDemandByAccount: [String: [String: Int]] = [:]
         /// The named container pools' shapes and caps, by name. Empty: the `container:` section is one pool, sized by
         /// `poolCaps` alone, exactly as before pools.
         var containerPools: [String: ContainerPoolShape] = [:]
@@ -315,14 +320,6 @@ struct ScalePlan: Equatable {
         // named pool's shape fits what is left of the budget.
         var exhausted: Set<RuntimeID> = []
         while out.count < count {
-            // The account with the most unmet demand (its jobs minus the
-            // instances that can serve them).
-            var coverage: [String: Int] = [:]
-            for record in sim where covers(record, includesRunning: input.includesRunning) {
-                if let account = record.platform { coverage[account, default: 0] += 1 }
-            }
-            let account = ForgeDemand.assignAccount(demand: totals, active: coverage, attached: input.attached)
-
             // The pool with the most unmet demand within its capacity.
             let unmet = unmetByPool(records: sim, input: input)
             var caps = input.poolCaps
@@ -332,9 +329,7 @@ struct ScalePlan: Equatable {
             // The in-flight pooled clones already hold a slot in their pool.
             for (pool, count) in reserved { running[pool, default: 0] += count }
             guard
-                let chosen = selectRuntime(
-                    unmet: unmet, active: running, caps: caps, fallback: input.defaultRuntime,
-                    poolExists: input.existingPools.contains)
+                let chosen = selectRuntimeForAdmission(unmet: unmet, active: running, caps: caps, input: input)
             else { break }  // unmet demand but no pool may take another instance
             if input.heldRuntimes.contains(chosen) { break }  // every pool with demand is backing off
             if exhausted.contains(chosen) { break }  // the fallback runtime is out of room
@@ -358,9 +353,17 @@ struct ScalePlan: Equatable {
                 }
                 pool = picked
             }
+            guard resourceFits(runtime: chosen, containerPool: pool, records: sim, input: input) else {
+                exhausted.insert(chosen)
+                continue
+            }
 
+            guard
+                let account = accountForAdmission(
+                    runtime: chosen, containerPool: pool, records: sim, totals: totals, input: input)
+            else { break }
             out.append(Slot(account: account, runtime: chosen, image: image, pool: pool))
-            sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)"))
+            sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)", input: input))
         }
         return out
     }

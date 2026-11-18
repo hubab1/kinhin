@@ -189,9 +189,11 @@ public struct PartialConfig: Decodable {
         var budget: [String: Double]?
         var routes: [PartialRoute]?
         var tart: PartialRuntimeTart?
+        var borrowIdleBudget: Bool?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
             case `default`, budget, routes, tart
+            case borrowIdleBudget = "borrow_idle_budget"
         }
     }
 
