@@ -32,7 +32,7 @@ public enum RuntimesConfigEditor {
             }
             return id
         }
-        return KinhinConfig.RuntimeConfig(
+        var runtime = KinhinConfig.RuntimeConfig(
             defaultRuntime: try rt.default.map(resolve) ?? .tart,
             budget: rt.budget ?? [:],
             routes: try (rt.routes ?? []).compactMap { route in
@@ -42,6 +42,8 @@ public enum RuntimesConfigEditor {
             },
             tartEnabled: rt.tart?.enabled ?? true
         )
+        runtime.isolatedTartCache = rt.tart?.isolatedCache ?? false
+        return runtime
     }
 
     // MARK: - Writing
@@ -50,9 +52,10 @@ public enum RuntimesConfigEditor {
     static func sectionText(_ rc: KinhinConfig.RuntimeConfig) -> String {
         var lines: [String] = ["runtimes:"]
         lines.append("  default: \(rc.defaultRuntime.rawValue)")
-        if !rc.tartEnabled {
+        if !rc.tartEnabled || rc.isolatedTartCache {
             lines.append("  tart:")
-            lines.append("    enabled: false")
+            if !rc.tartEnabled { lines.append("    enabled: false") }
+            if rc.isolatedTartCache { lines.append("    isolated_cache: true") }
         }
         if !rc.budget.isEmpty {
             lines.append("  budget:")

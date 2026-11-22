@@ -94,6 +94,7 @@ public struct ConfigLoader {
         cfg.docker = try partial.docker.map(parseDocker)
         if let runtimes = partial.runtimes {
             cfg.runtimes = try parseRuntimes(runtimes, container: cfg.container, docker: cfg.docker)
+            cfg.runtimes?.isolatedTartCache = runtimes.tart?.isolatedCache ?? false
         }
         try parseReserve(partial.reserve, into: &cfg)
         if let healing = partial.healing { cfg.healing = try parseHealing(healing) }

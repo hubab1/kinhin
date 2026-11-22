@@ -21,6 +21,8 @@ extension KinhinConfig {
         /// `runtimes.tart.enabled` (default true). false takes the Tart VM pool out of routing and scheduling;
         /// running VMs drain.
         public var tartEnabled: Bool
+        /// Lease a private writable cache for each Tart VM with project cache sharing.
+        var isolatedTartCache = false
 
         public struct Route: Sendable, Equatable {
             /// "owner/name" or "owner/name@Workflow Name".
