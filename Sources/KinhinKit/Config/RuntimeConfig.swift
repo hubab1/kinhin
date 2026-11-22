@@ -22,7 +22,7 @@ extension KinhinConfig {
         /// running VMs drain.
         public var tartEnabled: Bool
         /// Lease a private writable cache for each Tart VM with project cache sharing.
-        public var isolatedTartCache: Bool
+        var isolatedTartCache = false
 
         public struct Route: Sendable, Equatable {
             /// "owner/name" or "owner/name@Workflow Name".
@@ -47,10 +47,9 @@ extension KinhinConfig {
 
         public init(
             defaultRuntime: RuntimeID = .tart, budget: [String: Double] = [:], routes: [Route] = [],
-            tartEnabled: Bool = true, isolatedTartCache: Bool = false
+            tartEnabled: Bool = true
         ) {
             self.tartEnabled = tartEnabled
-            self.isolatedTartCache = isolatedTartCache
             self.defaultRuntime = defaultRuntime
             self.budget = budget
             self.routes = routes
@@ -60,7 +59,6 @@ extension KinhinConfig {
             case defaultRuntime = "default"
             case budget, routes
             case tartEnabled = "tart"
-            case isolatedTartCache = "isolated_cache"
         }
     }
 }

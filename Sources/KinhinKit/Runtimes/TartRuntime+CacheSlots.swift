@@ -7,7 +7,7 @@ extension TartRuntime {
             return [ToolchainCacheMount.tartDirectorySpec(scope: route.cacheScope)]
         }
         guard let scope = route.cacheScope else {
-            throw TartCacheSlots.Failure(message: "Isolated caches require a project image scope")
+            throw TartError.isolatedCache("Isolated caches require a project image scope")
         }
         try StoragePreflight.live.requireReady(.toolchainCache)
         let inventoryStartedAt = Date()

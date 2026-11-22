@@ -92,7 +92,7 @@ extension ConfigLoader {
             defaultRuntime: defaultRuntime,
             budget: budget,
             routes: routes,
-            tartEnabled: tartEnabled, isolatedTartCache: runtimes.tart?.isolatedCache ?? false
+            tartEnabled: tartEnabled
         )
     }
 

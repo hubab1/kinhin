@@ -56,11 +56,11 @@ public struct RepoRoute: Sendable, Equatable {
     /// The project image key scoping the cache share (nil = the whole cache).
     let cacheScope: String?
     /// Two independently seeded cache roots for concurrent Tart runners.
-    let cacheIsolationSlots: Int
+    private(set) var cacheIsolationSlots = 0
 
     public init(
         repo: String, image: String, ephemeral: Bool, bootTimeout: Int, cacheMount: Bool = false,
-        toolchains: KinhinConfig.ToolchainsConfig? = nil, cacheScope: String? = nil, cacheIsolationSlots: Int = 0
+        toolchains: KinhinConfig.ToolchainsConfig? = nil, cacheScope: String? = nil
     ) {
         self.repo = repo
         self.image = image
@@ -69,7 +69,6 @@ public struct RepoRoute: Sendable, Equatable {
         self.cacheMount = cacheMount
         self.toolchains = toolchains
         self.cacheScope = cacheScope
-        self.cacheIsolationSlots = cacheIsolationSlots
     }
 
     /// The route for a runner: the fleet's base image, or the derived
@@ -78,16 +77,19 @@ public struct RepoRoute: Sendable, Equatable {
         config: KinhinConfig, image: String? = nil, toolchains: KinhinConfig.ToolchainsConfig? = nil,
         cacheMount: Bool = false, cacheScope: String? = nil
     ) -> RepoRoute {
-        RepoRoute(
+        var route = RepoRoute(
             repo: config.repo,
             image: image ?? config.image,
             ephemeral: config.vm.ephemeral,
             bootTimeout: config.vmBootTimeout,
             cacheMount: cacheMount,
             toolchains: toolchains,
-            cacheScope: cacheScope,
-            cacheIsolationSlots: cacheMount && config.runtimes?.isolatedTartCache == true ? 2 : 0
+            cacheScope: cacheScope
         )
+        if cacheMount && config.runtimes?.isolatedTartCache == true {
+            route.cacheIsolationSlots = 2
+        }
+        return route
     }
 }
 
@@ -277,8 +279,8 @@ struct TartRuntime: Runtime {
             try await tart.set(name: id, cpu: cpuCount(), memoryMB: memoryMB())
             // Teardown only cancels this task without waiting for it, so a VM
             // whose stop lands in this window must not be started again.
-            try Task.checkCancellation()
             let mounts = try await cacheMounts(id: id, route: route)
+            try Task.checkCancellation()
             try await tart.run(name: id, mounts: mounts)
             return
         }
@@ -288,8 +290,8 @@ struct TartRuntime: Runtime {
         // Same window as the recovery path: cancelled between `tart.set` and
         // `tart.run`, the fresh clone stays a stopped VM for teardown's stop
         // instead of outliving it.
-        try Task.checkCancellation()
         let mounts = try await cacheMounts(id: id, route: route)
+        try Task.checkCancellation()
         try await tart.run(name: id, mounts: mounts)
     }
 

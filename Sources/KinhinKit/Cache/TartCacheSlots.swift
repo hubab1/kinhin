@@ -1,14 +1,10 @@
+import Darwin
 import Foundation
 
 /// Persistent single-writer cache slots. Every Tart runtime uses `shared`, so
 /// an inventory read that overlaps another acquisition cannot reap its lease.
 actor TartCacheSlots {
     static let shared = TartCacheSlots()
-
-    struct Failure: LocalizedError {
-        let message: String
-        var errorDescription: String? { message }
-    }
 
     private struct Manifest: Codable {
         let schema: Int
@@ -29,8 +25,11 @@ actor TartCacheSlots {
     func mounts(vm: String, scope: String, count: Int, liveVMs: Set<String>, inventoryStartedAt: Date)
         throws -> [String]
     {
+        // Teardown cancels provisioning before it inspects the lease. An
+        // acquisition queued behind that inspection must never claim a slot.
+        try Task.checkCancellation()
         guard validVM(vm), validComponent(scope), count == 2 else {
-            throw Failure(message: "Invalid isolated runner cache identity or slot count")
+            throw TartError.isolatedCache("Invalid isolated runner cache identity or slot count")
         }
         let cache = Paths.toolchainCache
         let slotsRoot =
@@ -43,21 +42,25 @@ actor TartCacheSlots {
         try requireUnlinked(manifestURL)
         let manifest = try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL))
         guard manifest.schema == 1, manifest.scope == scope, manifest.slots == count else {
-            throw Failure(message: "Cache slots must be prepared offline for this project image")
+            throw TartError.isolatedCache("Cache slots must be prepared offline for this project image")
         }
+        // Check every slot for this VM before taking a free one, so a recovered
+        // stopped VM keeps its original products even if an earlier slot is free.
+        var available: (slot: URL, lease: URL, reclaim: Bool)?
         for index in 0..<count {
             let slot = directory.appendingPathComponent("slot-\(index)")
             try requireUnlinked(slot)
             guard FileManager.default.fileExists(atPath: slot.path) else {
-                throw Failure(message: "Prepared cache slot is missing: \(slot.path)")
+                throw TartError.isolatedCache("Prepared cache slot is missing: \(slot.path)")
             }
             let lease = directory.appendingPathComponent("lease-\(index)")
             try requireUnlinked(lease)
-            if FileManager.default.fileExists(atPath: lease.path) {
+            let leased = FileManager.default.fileExists(atPath: lease.path)
+            if leased {
                 let ownerURL = lease.appendingPathComponent("owner.json")
                 try requireUnlinked(ownerURL)
-                // An ownerless lease is never stolen. Offline preparation can
-                // reclaim it only after all runner guests have been deleted.
+                // Protect an incomplete legacy lease. New leases are published
+                // with an owner in a single rename.
                 guard FileManager.default.fileExists(atPath: ownerURL.path) else { continue }
                 let owner = try JSONDecoder().decode(Owner.self, from: Data(contentsOf: ownerURL))
                 if owner.vm == vm {
@@ -67,19 +70,34 @@ actor TartCacheSlots {
                 guard validVM(owner.vm), held[owner.vm] == nil, !liveVMs.contains(owner.vm),
                     owner.claimedAt < inventoryStartedAt
                 else { continue }
-                try FileManager.default.removeItem(at: lease)
             }
-            do {
-                try FileManager.default.createDirectory(at: lease, withIntermediateDirectories: false)
-            } catch let error as CocoaError where error.code == .fileWriteFileExists {
-                continue
-            }
-            try JSONEncoder().encode(Owner(vm: vm, claimedAt: Date())).write(
-                to: lease.appendingPathComponent("owner.json"), options: .atomic)
-            held[vm] = lease
-            return [ToolchainCacheMount.guestDirectoryName + ":" + slot.path]
+            if available == nil { available = (slot, lease, leased) }
         }
-        throw Failure(message: "All isolated cache slots are leased; live or unknown owners remain protected")
+        guard let available else {
+            throw TartError.isolatedCache(
+                "All isolated cache slots are leased; live or unknown owners remain protected")
+        }
+        if available.reclaim { try FileManager.default.removeItem(at: available.lease) }
+        try publishLease(at: available.lease, owner: Owner(vm: vm, claimedAt: Date()))
+        held[vm] = available.lease
+        return [ToolchainCacheMount.guestDirectoryName + ":" + available.slot.path]
+    }
+
+    private func publishLease(at lease: URL, owner: Owner) throws {
+        let stage = lease.deletingLastPathComponent().appendingPathComponent(".claim-\(UUID().uuidString)")
+        let manager = FileManager.default
+        try manager.createDirectory(at: stage, withIntermediateDirectories: false)
+        defer {
+            if manager.fileExists(atPath: stage.path) {
+                bestEffort("cache", "remove unpublished cache lease") { try manager.removeItem(at: stage) }
+            }
+        }
+        try JSONEncoder().encode(owner).write(to: stage.appendingPathComponent("owner.json"))
+        // Rename on the same filesystem publishes the directory and owner together.
+        // Exclusive rename also protects against an unexpected concurrent claim.
+        guard renameatx_np(AT_FDCWD, stage.path, AT_FDCWD, lease.path, UInt32(RENAME_EXCL)) == 0 else {
+            throw TartError.isolatedCache("Could not publish isolated cache lease (errno \(errno))")
+        }
     }
 
     func holds(_ vm: String) -> Bool { held[vm] != nil }
@@ -87,7 +105,7 @@ actor TartCacheSlots {
     /// The caller must prove deletion using the runtime's actual inventory.
     func releaseDeletedVM(_ vm: String, liveVMs: Set<String>) throws {
         guard !liveVMs.contains(vm) else {
-            throw Failure(message: "Cannot release the cache of a VM that still exists")
+            throw TartError.isolatedCache("Cannot release the cache of a VM that still exists")
         }
         guard let lease = held[vm] else { return }
         try requireUnlinked(lease)
@@ -98,7 +116,7 @@ actor TartCacheSlots {
         let ownerURL = lease.appendingPathComponent("owner.json")
         try requireUnlinked(ownerURL)
         let owner = try JSONDecoder().decode(Owner.self, from: Data(contentsOf: ownerURL))
-        guard owner.vm == vm else { throw Failure(message: "Runner cache lease ownership changed") }
+        guard owner.vm == vm else { throw TartError.isolatedCache("Runner cache lease ownership changed") }
         try FileManager.default.removeItem(at: lease)
         held.removeValue(forKey: vm)
     }
@@ -106,7 +124,7 @@ actor TartCacheSlots {
     private func requireUnlinked(_ url: URL) throws {
         guard url.isFileURL, url.path.hasPrefix("/"),
             url.standardizedFileURL == url.resolvingSymlinksInPath().standardizedFileURL
-        else { throw Failure(message: "Runner cache paths must not traverse symlinks") }
+        else { throw TartError.isolatedCache("Runner cache paths must not traverse symlinks") }
     }
 
     private func validComponent(_ value: String) -> Bool {
@@ -114,6 +132,6 @@ actor TartCacheSlots {
     }
 
     private func validVM(_ value: String) -> Bool {
-        value.range(of: "^kinhin-[0-9]{9,11}-[0-9a-f]{4,8}$", options: .regularExpression) != nil
+        value.range(of: InstanceNaming.generatedNamePattern, options: .regularExpression) != nil
     }
 }

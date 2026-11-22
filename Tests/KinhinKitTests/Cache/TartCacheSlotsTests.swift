@@ -5,9 +5,9 @@ import XCTest
 
 @MainActor
 final class TartCacheSlotsTests: XCTestCase {
-    private let first = "kinhin-1794800000-aaaa1111"
-    private let second = "kinhin-1794800001-bbbb2222"
-    private let third = "kinhin-1794800002-cccc3333"
+    private let first = "\(InstanceNaming.prefix)1794800000-aaaa1111"
+    private let second = "\(InstanceNaming.prefix)1794800001-bbbb2222"
+    private let third = "\(InstanceNaming.prefix)1794800002-cccc3333"
 
     private struct Fixture {
         let root: URL
@@ -90,7 +90,7 @@ final class TartCacheSlotsTests: XCTestCase {
             do {
                 _ = try await acquire(third, fixture: fixture, started: .distantFuture)
                 XCTFail("In-process owners remain protected even when an inventory overlaps their creation")
-            } catch is TartCacheSlots.Failure {}
+            } catch TartError.isolatedCache {}
         }
     }
 
@@ -100,7 +100,7 @@ final class TartCacheSlotsTests: XCTestCase {
             do {
                 try await fixture.manager.releaseDeletedVM(first, liveVMs: [first])
                 XCTFail("A stopped, failed or deleting VM is still present")
-            } catch is TartCacheSlots.Failure {}
+            } catch TartError.isolatedCache {}
             try await fixture.manager.releaseDeletedVM(first, liveVMs: [])
             let next = try await acquire(second, fixture: fixture)
             XCTAssertEqual(original, next)
@@ -158,7 +158,7 @@ final class TartCacheSlotsTests: XCTestCase {
             do {
                 _ = try await acquire(first, fixture: fixture, started: .distantFuture)
                 XCTFail("Unrecognised owners are protected without an expiry")
-            } catch is TartCacheSlots.Failure {}
+            } catch TartError.isolatedCache {}
         }
     }
 
@@ -167,6 +167,48 @@ final class TartCacheSlotsTests: XCTestCase {
             let a = try await acquire(first, fixture: fixture)
             let b = try await acquire(first, fixture: fixture)
             XCTAssertEqual(a, b)
+        }
+    }
+
+    func testRestartFindsExistingOwnerBeforeClaimingFreeFirstSlot() async throws {
+        try await withFixture { fixture in
+            let a = try await acquire(first, fixture: fixture)
+            let b = try await acquire(second, fixture: fixture, live: [first, second])
+            try await fixture.manager.releaseDeletedVM(first, liveVMs: [second])
+            let restarted = Fixture(root: fixture.root, manager: TartCacheSlots(root: fixture.root))
+            let recovered = try await acquire(second, fixture: restarted, live: [second])
+            XCTAssertEqual(recovered, b)
+            let new = try await acquire(third, fixture: restarted, live: [second, third])
+            XCTAssertEqual(new, a)
+        }
+    }
+
+    func testCancelledMountDoesNotClaimAnySlot() async throws {
+        try await withFixture { fixture in
+            let task = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return try await acquire(first, fixture: fixture)
+            }
+            do {
+                _ = try await task.value
+                XCTFail("Teardown can cancel a provision before its cache acquisition")
+            } catch is CancellationError {}
+            let held = await fixture.manager.holds(first)
+            XCTAssertFalse(held)
+            let mounts = try await acquire(second, fixture: fixture)
+            XCTAssertTrue(mounts[0].hasSuffix("/slot-0"))
+        }
+    }
+
+    func testInterruptedStagedLeaseDoesNotBlockTheSlot() async throws {
+        try await withFixture { fixture in
+            let directory = fixture.root.appendingPathComponent(fixture.scope)
+            let interrupted = directory.appendingPathComponent(".claim-interrupted")
+            try FileManager.default.createDirectory(at: interrupted, withIntermediateDirectories: false)
+            let mounts = try await acquire(first, fixture: fixture)
+            XCTAssertTrue(mounts[0].hasSuffix("/slot-0"))
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: directory.appendingPathComponent("lease-0/owner.json").path))
         }
     }
 
@@ -180,7 +222,7 @@ final class TartCacheSlotsTests: XCTestCase {
             do {
                 _ = try await acquire(first, fixture: fixture)
                 XCTFail("A slot must never share another path through a symlink")
-            } catch is TartCacheSlots.Failure {}
+            } catch TartError.isolatedCache {}
             XCTAssertEqual(try String(contentsOf: outside.appendingPathComponent("build.db"), encoding: .utf8), "seed")
         }
     }

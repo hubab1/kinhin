@@ -32,7 +32,7 @@ public enum RuntimesConfigEditor {
             }
             return id
         }
-        return KinhinConfig.RuntimeConfig(
+        var runtime = KinhinConfig.RuntimeConfig(
             defaultRuntime: try rt.default.map(resolve) ?? .tart,
             budget: rt.budget ?? [:],
             routes: try (rt.routes ?? []).compactMap { route in
@@ -40,8 +40,10 @@ public enum RuntimesConfigEditor {
                 return KinhinConfig.RuntimeConfig.Route(
                     pattern: pattern, runtime: try resolve(name), consent: route.consent)
             },
-            tartEnabled: rt.tart?.enabled ?? true, isolatedTartCache: rt.tart?.isolatedCache ?? false
+            tartEnabled: rt.tart?.enabled ?? true
         )
+        runtime.isolatedTartCache = rt.tart?.isolatedCache ?? false
+        return runtime
     }
 
     // MARK: - Writing

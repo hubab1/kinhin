@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import platform
 import plistlib
@@ -93,6 +94,11 @@ class OfflineInventoryTests(unittest.TestCase):
                       {'Name': 'kinhin-1794800000-aaaa1111', 'State': 'stopped'}]:
             with self.subTest(entry=entry), self.assertRaises(RuntimeError):
                 self.check(tart=[entry])
+
+    def test_debug_runner_prefix_is_protected(self):
+        with patch.dict(os.environ, {'KINHIN_INSTANCE_PREFIX': 'ke2e-'}):
+            with self.assertRaisesRegex(RuntimeError, 'runner still exists'):
+                self.check(tart=[{'Name': 'ke2e-1794800000-aaaa1111', 'State': 'stopped'}])
 
     def test_unknown_container_state_is_protected(self):
         with self.assertRaises(RuntimeError):

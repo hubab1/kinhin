@@ -30,6 +30,7 @@ public enum TartError: LocalizedError {
     case missingBinary(path: String)
     case commandFailed(what: String, stderr: String)
     case ipNotFound(vm: String)
+    case isolatedCache(String)
 
     public var errorDescription: String? {
         switch self {
@@ -38,6 +39,8 @@ public enum TartError: LocalizedError {
                 "tart not found at '\(path)'. Install it with: \(TartHealthProbe.installCommand)"
         case .commandFailed(let what, let stderr):
             return "tart \(what) failed: \(stderr.prefix(400))"
+        case .isolatedCache(let message):
+            return message
         case .ipNotFound(let vm):
             return "could not resolve IP address for VM '\(vm)'"
         }

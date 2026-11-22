@@ -93,12 +93,19 @@ def require_stopped(source=None):
     guests = read('tart', 'list', '--format', 'json')
     if not isinstance(guests, list):
         raise RuntimeError('Unknown Tart inventory format')
+    prefixes = {'kinhin-', 'orchard-'}
+    override = os.environ.get('KINHIN_INSTANCE_PREFIX')
+    if override:
+        if not re.fullmatch(r'[a-z][a-z0-9]{1,15}-', override):
+            raise RuntimeError('Invalid KINHIN_INSTANCE_PREFIX')
+        prefixes.add(override)
+    runner_name = rf"(?:{'|'.join(re.escape(prefix) for prefix in sorted(prefixes))})\d{{9,11}}-[0-9a-f]{{4,8}}"
     for guest in guests:
         name = guest.get('Name', guest.get('name'))
         state = guest.get('State', guest.get('state'))
         if not isinstance(name, str) or state != 'stopped' or guest.get('Running', False) is not False:
             raise RuntimeError('A Tart image is running, suspended or has an unknown state')
-        if re.fullmatch(r'kinhin-\d{9,11}-[0-9a-f]{4,8}', name):
+        if re.fullmatch(runner_name, name):
             raise RuntimeError('A Tart runner still exists')
     if shutil.which('container'):
         containers = read('container', 'list', '--format', 'json')
