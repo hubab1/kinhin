@@ -17,7 +17,7 @@ extension KinhinConfig {
         public var budget: [String: Double]
         /// Let on-demand Tart instances use idle shares, within the host's
         /// combined CPU/RAM limit. Other runtimes retain their partition caps.
-        public var borrowIdleBudget: Bool
+        var borrowIdleBudget = false
         /// Repo or `owner/repo@workflow` → runtime. Repo routes take
         /// precedence over workflow routes; first matching route wins.
         public var routes: [Route]
@@ -48,12 +48,11 @@ extension KinhinConfig {
 
         public init(
             defaultRuntime: RuntimeID = .tart, budget: [String: Double] = [:], routes: [Route] = [],
-            tartEnabled: Bool = true, borrowIdleBudget: Bool = false
+            tartEnabled: Bool = true
         ) {
             self.tartEnabled = tartEnabled
             self.defaultRuntime = defaultRuntime
             self.budget = budget
-            self.borrowIdleBudget = borrowIdleBudget
             self.routes = routes
         }
 
@@ -61,7 +60,6 @@ extension KinhinConfig {
             case defaultRuntime = "default"
             case budget, routes
             case tartEnabled = "tart"
-            case borrowIdleBudget = "borrow_idle_budget"
         }
     }
 }

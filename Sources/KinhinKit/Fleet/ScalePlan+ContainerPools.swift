@@ -80,6 +80,14 @@ extension ScalePlan {
 
     /// The named pool `name`'s queued need minus its free instances (negative when it has spare ones).
     static func containerPoolUnmet(_ name: String, records: [VMRecord], input: Input) -> Int {
+        if input.resources != nil, !input.containerPoolDemandByAccount.isEmpty {
+            let coverage = jobCoverage(runtime: .appleContainer, namedPool: name, records: records, input: input)
+            let jobsPerInstance = max(1, input.runnersPerVM)
+            return input.containerPoolDemandByAccount.reduce(0) { total, entry in
+                let jobs = max(0, (entry.value[name] ?? 0) - (coverage[entry.key] ?? 0))
+                return total + Int(ceil(Double(jobs) / Double(jobsPerInstance)))
+            }
+        }
         let key = IdleKey(runtime: .appleContainer, pool: name)
         return queuedNeed(key, input: input) - freeInstances(key, records: records, input: input)
     }

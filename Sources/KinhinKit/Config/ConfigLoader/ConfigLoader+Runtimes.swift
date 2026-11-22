@@ -88,12 +88,14 @@ extension ConfigLoader {
             throw ConfigError.invalid(
                 "runtimes.budget weights sum to \(String(format: "%.2f", totalWeight)) — the total must be <= 1.0")
         }
-        return KinhinConfig.RuntimeConfig(
+        var runtime = KinhinConfig.RuntimeConfig(
             defaultRuntime: defaultRuntime,
             budget: budget,
             routes: routes,
-            tartEnabled: tartEnabled, borrowIdleBudget: runtimes.borrowIdleBudget ?? false
+            tartEnabled: tartEnabled
         )
+        runtime.borrowIdleBudget = runtimes.borrowIdleBudget ?? false
+        return runtime
     }
 
     static func validateIdleBorrowing(_ config: KinhinConfig) throws {
@@ -102,6 +104,9 @@ extension ConfigLoader {
             config.container != nil || config.docker != nil
         else {
             throw ConfigError.invalid("runtimes.borrow_idle_budget requires default: tart and another isolated runtime")
+        }
+        guard config.vm.ephemeral else {
+            throw ConfigError.invalid("runtimes.borrow_idle_budget requires vm.ephemeral: true")
         }
         guard config.minRunners == 0, config.warmPool == 0, config.imageMinIdle == 0,
             config.images.allSatisfy({ $0.warmPool == 0 && $0.minIdle == 0 }),

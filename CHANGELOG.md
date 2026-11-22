@@ -4,6 +4,18 @@
 
 <!-- changelog: entries for the next release go here -->
 
+**Added**
+
+- Opt-in idle capacity borrowing lets Tart use spare CPU and RAM from other runtime pools. Queued work for those pools
+  gets priority as slots become free. See [Scaling](docs/scaling.md#borrowing-idle-tart-capacity).
+
+**Changed**
+
+- On phones the docs navigation opens as a drawer over the page from the left — from the right in right-to-left locales — with a scrim and a close button in its top corner, instead of opening above the article (where it was out of sight once you had scrolled down). While it is open the page behind it neither scrolls nor takes the keyboard: Tab stays within the drawer, Escape, the close button and the scrim close it, and the keyboard goes back to the ☰ bar. That bar and the site header stay visible over the drawer, and the main menu opens above them both.
+- The website is rebuilt: a new design on Next.js, served from Cloudflare Workers. Every page is also available as markdown (`<page>.md`, `Accept: text/markdown`, `llms.txt`), release docs stay under `/<tag>/`, and the old `.html` URLs redirect to the clean ones. See [contributing](CONTRIBUTING.md#website-tests).
+
+## v0.0.1-beta-7
+
 **Changed**
 
 - The app's window is one sidebar (Fleet, Runtimes, Accounts, Toolchains, Diagnostics, Settings) instead of Fleet and
@@ -11,11 +23,12 @@
   sidebar footer. The menu bar's **Settings…** now opens Settings, and **Open Logs** opens Diagnostics → Logs. See
   [the app](docs/app.md).
 - Diagnostics and Settings follow the new design: Health has a **Re-check** button, and Settings has one **Support kinhin** card.
+- Every `min_idle` floor (`image_min_idle`, `images[].min_idle`, `container.min_idle`, each container pool's and
+  `docker.min_idle`) now applies on a config reload without restarting the engine. Before, only `images[].min_idle`
+  did. Adding or removing a pool, switching a pool or runtime on or off, or changing a pool's `max` still rebuilds the
+  engine.
 
 **Added**
-
-- Opt-in idle capacity borrowing lets Tart use spare CPU and RAM from other runtime pools. Queued work for those pools
-  gets priority as slots become free. See [Scaling](docs/scaling.md#borrowing-idle-tart-capacity).
 
 - The Runtimes page is rebuilt: fleet capacity, the split, a card per runtime and the routes in one place, with a pinned
   Apply bar. Every runtime has a **Keep idle** floor (`min_idle`) that is checked before Apply and takes effect without
@@ -58,12 +71,13 @@
 - A duplicate `images:` name says which key already has it (`image:`, also when it is left out and defaults to
   `tahoe-base`, or which `images:` entry) and how to fix it.
 
-**Changed**
+**Upgrading**
 
-- Every `min_idle` floor (`image_min_idle`, `images[].min_idle`, `container.min_idle`, each container pool's and
-  `docker.min_idle`) now applies on a config reload without restarting the engine. Before, only `images[].min_idle`
-  did. Adding or removing a pool, switching a pool or runtime on or off, or changing a pool's `max` still rebuilds the
-  engine.
+- There is no breaking change, and no config change is needed. Pools stay on, `tart_home`, `container_app_root` and the
+  cache paths keep their defaults, and `docker.build_cache` and `alerts.webhooks` stay off until you set them.
+- The app's window is reorganised: Logs, Diagnostics, Benchmarks and Containers are now panes of Diagnostics.
+- Update from beta 6 in the app, or install over it when no jobs are running. Updating restarts the daemon onto the new
+  build and interrupts its running jobs, so update when the fleet is idle.
 
 ## v0.0.1-beta-6
 

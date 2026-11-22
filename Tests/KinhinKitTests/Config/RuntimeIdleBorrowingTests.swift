@@ -59,6 +59,13 @@ final class RuntimeIdleBorrowingTests: XCTestCase {
         }
     }
 
+    func testPersistentVMsAreRejectedInBorrowingMode() {
+        let persistent = yaml.replacingOccurrences(of: "memory_gb: 6}", with: "memory_gb: 6, ephemeral: false}")
+        XCTAssertThrowsError(try ConfigLoader.parse(persistent)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("vm.ephemeral: true"))
+        }
+    }
+
     func testEditingRoutesPreservesBorrowingAndTheLinuxBudget() throws {
         var model = try XCTUnwrap(RuntimesConfigEditor.parsed(from: yaml))
         XCTAssertTrue(model.borrowIdleBudget)

@@ -31,7 +31,9 @@ counted with the smallest pool's CPU and memory, an upper bound, and each runner
 
 For an on-demand mixed fleet, `runtimes.borrow_idle_budget: true` lets the default Tart pool use otherwise
 idle CPU and RAM shares. It is off by default. Other runtimes retain their original partition caps; their queued
-work gets its share back at the next free slot, without preempting a busy VM.
+work gets priority for the next free slot. If a Linux runner fits only after more Tart VMs finish,
+the scheduler leaves space open for it. It can release an idle Tart runner when the forge confirms the
+runner is idle and the remaining Tart runners cover their own queue. Busy runners finish their jobs.
 
 For example, an 8-core, 16 GiB Mac with a 4 GiB host reserve can admit two 4-CPU, 6 GiB Tart VMs while Linux is idle,
 or one such Mac VM alongside a 2-CPU, 4 GiB Linux runner. The combined configured allocations must fit the host
@@ -51,7 +53,7 @@ runtimes:
 ```
 
 Keep the Linux image and pool configuration as usual, with all `min_idle` floors at zero. Borrowing requires
-`default: tart`, another isolated runtime, no host routes, and all warm and idle floors off. At most two Tart
+`default: tart`, `vm.ephemeral: true`, another isolated runtime, no host routes, and all warm and idle floors off. At most two Tart
 instances are admitted in this mode. Every instance keeps its original CPU/RAM reservation through teardown;
 changing the config cannot shrink a live VM on paper. An adopted or legacy instance with no known allocation
 holds the budget until it is removed. Changing the borrowing option rebuilds the engine; drain the fleet first.
@@ -292,7 +294,7 @@ cover the _sum_ of the jobs you expect on one VM.
 
 With a GitHub scale set (`scale_set:`), keep `runners_per_vm: 1`: GitHub does not hand a second job to another idle
 runner in the same VM, and the scaler counts those slots as capacity, so the job waits for the first one to finish
-([details](forges/github.md#a-second-job-stays-queued-while-the-vm-has-idle-runners-runners-per-vm-1)).
+([details](forges/github.md#a-second-job-stays-queued-while-the-vm-has-idle-runners-runners_per_vm--1)).
 
 ## Running on multiple Macs
 
