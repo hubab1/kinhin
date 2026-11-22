@@ -486,6 +486,70 @@ rejects two pools with the same labels and platform, a `max:` below the pool's `
 `linux/arm64` or `linux/amd64`, and each pool's `flags` by the rules above. Without `pools:`, the `container:` section is one pool and
 behaves exactly as before.
 
+#### Private dependency caches for parallel Linux jobs
+
+Apple container gives each ephemeral runner a private filesystem. A writable host bind mount can put the same
+cache back in several guests. If a job prunes a shared package store or updates a browser installation while another
+uses it, the other job can fail. Check existing volume flags before increasing a pool's `max`.
+
+For two concurrent jobs, set `max_runners: 2` and `runners_per_vm: 1` on an ephemeral fleet. Size the Apple container
+budget for both instances after the host reserve. The example pool needs 4 CPU cores and 8 GiB of runner memory.
+With `min_runners`, `warm_pool` and the pool's `min_idle` set to `0`, runners start on demand.
+Add the example to a Linux-only fleet's config and keep its forge account settings. For a mixed fleet, keep
+your existing routing and allocate both Linux instances within the Apple container share.
+
+```yaml
+labels: [self-hosted, linux, arm64]
+max_runners: 2
+runners_per_vm: 1
+min_runners: 0
+warm_pool: 0
+vm: {ephemeral: true}
+runtimes:
+  default: appleContainer
+  tart: {enabled: false}
+container:
+  pools:
+    project:
+      image: kinhin-ci-linux
+      labels: [project-linux]
+      cpus: 2
+      memory_gb: 4
+      max: 2
+      min_idle: 0
+      flags:
+        - --volume
+        - "/absolute/path/to/project-cache-seed:/opt/ci-cache-seed:ro"
+```
+
+Populate the host seed with the package store and browser versions for a trusted repository, platform, and toolchain.
+Keep the seed immutable while guests use it. Retain any required network or other run flags when setting `flags:` on
+an existing pool, because pool flags replace the section's defaults. Build the image with
+`kinhin image prepare --container --pool project` if the image is missing.
+
+On GitHub Actions, use `runs-on: kinhin-container-project` for a scale set. In classic runner mode, use
+`runs-on: [self-hosted, linux, arm64, kinhin-container-project]` with the example configuration. For a fleet with
+different labels, include its Linux fleet labels and the pool marker.
+In an image with GNU coreutils, prepare pnpm and Playwright paths before installing dependencies:
+
+```yaml
+- name: Seed private dependency caches
+  shell: bash
+  run: |
+    set -euo pipefail
+    cache="$(mktemp -d "$RUNNER_TEMP/dependencies.XXXXXXXX")"
+    cp -a --no-preserve=ownership,xattr -- /opt/ci-cache-seed/. "$cache/"
+    chmod -R u+rwX -- "$cache"
+    printf 'PNPM_STORE_DIR=%s/pnpm\nPLAYWRIGHT_BROWSERS_PATH=%s/playwright\n' \
+      "$cache" "$cache" >> "$GITHUB_ENV"
+```
+
+In subsequent steps pass `--store-dir "$PNPM_STORE_DIR"` to
+`pnpm install`. Playwright reads `PLAYWRIGHT_BROWSERS_PATH` directly. Updates and pruning touch the guest's copy, and
+teardown discards it. A new runner pays the seed copy cost, so bound the seed and include that time when comparing
+serial and parallel jobs. Log or archive test reports separately, with per-run filenames and coordinated retention
+for any shared report directory.
+
 ### Docker
 
 ```yaml
