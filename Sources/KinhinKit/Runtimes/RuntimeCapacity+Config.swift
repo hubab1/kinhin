@@ -51,9 +51,17 @@ extension RuntimeCapacity {
     /// single-pool fleet.
     static func caps(for config: KinhinConfig, host: HostResources) -> [RuntimeID: Int] {
         guard isPartitioned(config), let routing = config.runtimes else { return [:] }
-        return partitionedCaps(
+        var caps = partitionedCaps(
             for: config, host: host, weights: routing.budget,
             defaultRuntime: routing.defaultRuntime)
+        if routing.borrowIdleBudget, config.tartEnabled {
+            let shape = shape(of: .tart, in: config)
+            let usable = Budget(
+                cpu: max(0, host.logicalCores - config.reserve.cpu),
+                memoryGB: max(0, host.memoryGB - config.reserve.memoryGB))
+            caps[.tart] = min(2, usable.count(cpu: shape.cpu, memoryGB: shape.memoryGB))
+        }
+        return caps
     }
 
     /// `weights` without the disabled pools: a disabled pool's share falls to the default runtime like any unclaimed

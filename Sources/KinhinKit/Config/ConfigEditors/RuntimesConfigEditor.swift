@@ -32,7 +32,7 @@ public enum RuntimesConfigEditor {
             }
             return id
         }
-        return KinhinConfig.RuntimeConfig(
+        var runtime = KinhinConfig.RuntimeConfig(
             defaultRuntime: try rt.default.map(resolve) ?? .tart,
             budget: rt.budget ?? [:],
             routes: try (rt.routes ?? []).compactMap { route in
@@ -42,6 +42,8 @@ public enum RuntimesConfigEditor {
             },
             tartEnabled: rt.tart?.enabled ?? true
         )
+        runtime.borrowIdleBudget = rt.borrowIdleBudget ?? false
+        return runtime
     }
 
     // MARK: - Writing
@@ -54,6 +56,7 @@ public enum RuntimesConfigEditor {
             lines.append("  tart:")
             lines.append("    enabled: false")
         }
+        if rc.borrowIdleBudget { lines.append("  borrow_idle_budget: true") }
         if !rc.budget.isEmpty {
             lines.append("  budget:")
             for (name, weight) in rc.budget.sorted(by: { $0.key < $1.key }) {
@@ -111,6 +114,9 @@ public enum RuntimesConfigEditor {
     }
 
     static func formatWeight(_ weight: Double) -> String {
-        String(format: "%g", weight)
+        let compact = String(format: "%g", weight)
+        // Rounding 1/3 to six digits turns a four GiB share into three GiB
+        // after flooring. Preserve the allocation when editing unrelated routes.
+        return Double(compact) == weight ? compact : String(weight)
     }
 }

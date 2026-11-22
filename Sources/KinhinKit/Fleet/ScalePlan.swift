@@ -47,6 +47,8 @@ struct ScalePlan: Equatable {
         var capacityCap: Int
         /// Per-runtime partition caps; a runtime with no entry is uncapped.
         var poolCaps: [RuntimeID: Int] = [:]
+        /// Combined CPU/RAM admission, nil for legacy fixed partitions.
+        var resources: ScaleResourceBudget? = nil
         /// Runtimes backing off after repeated start failures.
         var heldRuntimes: Set<RuntimeID> = []
         /// Runtimes that have a configured pool.
@@ -63,6 +65,10 @@ struct ScalePlan: Equatable {
         var minIdle: [IdleKey: Int] = [:]
         /// Queued Apple container jobs per named container pool (`ScalePlan+ContainerPools`).
         var containerPoolDemand: [String: Int] = [:]
+        /// The same named-pool demand by account, so a pool cannot register its
+        /// runner in another account that has no jobs that pool can execute.
+        var containerPoolDemandByAccount: [String: [String: Int]] = [:]
+        var containerPoolQueueDatesByAccount: [String: [String: [Date]]] = [:]
         /// The named container pools' shapes and caps, by name. Empty: the `container:` section is one pool, sized by
         /// `poolCaps` alone, exactly as before pools.
         var containerPools: [String: ContainerPoolShape] = [:]
@@ -148,6 +154,10 @@ struct ScalePlan: Equatable {
             } else {
                 plan.scaleDownHeld = true
             }
+        }
+        if input.resources != nil, input.failedForges.isEmpty, plan.slots.isEmpty, plan.scaleDown.isEmpty {
+            plan.scaleDown = idleTartToRelease(
+                active: active, cap: cap - reserved, reserved: reservedByPool, input: input)
         }
         return plan
     }
@@ -259,21 +269,30 @@ struct ScalePlan: Equatable {
         record.runtimeID ?? input.defaultRuntime
     }
 
+    private struct QueueOwner: Hashable {
+        let includesRunning: Bool
+        let account: String?
+    }
+
     /// Unmet instances per pool: for each demand kind (queued-only, or
     /// including running) the instances its jobs need minus the instances of
     /// that kind that can serve them.
     static func unmetByPool(records: [VMRecord], input: Input) -> [RuntimeID: Int] {
         let rpv = max(1, input.runnersPerVM)
-        var jobs: [RuntimeID: [Bool: Int]] = [:]  // pool → includesRunning → jobs
-        for (account, pools) in input.demand {
-            let kind = input.includesRunning.contains(account)
-            for (pool, count) in pools where count > 0 { jobs[pool, default: [:]][kind, default: 0] += count }
+        // Borrowing uses account-specific admission: a runner registered with one account
+        // cannot cover a different account's jobs. Keep fixed partition plans unchanged.
+        func owner(_ account: String?) -> QueueOwner {
+            QueueOwner(
+                includesRunning: input.includesRunning.contains(account ?? ""),
+                account: input.resources == nil ? nil : account)
         }
-        var supply: [RuntimeID: [Bool: Int]] = [:]
-        for record in records {
-            let kind = input.includesRunning.contains(record.platform ?? "")
-            guard covers(record, includesRunning: input.includesRunning) else { continue }
-            supply[pool(of: record, input: input), default: [:]][kind, default: 0] += 1
+        var jobs: [RuntimeID: [QueueOwner: Int]] = [:]
+        for (account, pools) in input.demand {
+            for (pool, count) in pools where count > 0 { jobs[pool, default: [:]][owner(account), default: 0] += count }
+        }
+        var supply: [RuntimeID: [QueueOwner: Int]] = [:]
+        for record in records where covers(record, includesRunning: input.includesRunning) {
+            supply[pool(of: record, input: input), default: [:]][owner(record.platform), default: 0] += 1
         }
         var result: [RuntimeID: Int] = [:]
         for (pool, byKind) in jobs {
@@ -306,8 +325,7 @@ struct ScalePlan: Equatable {
 
     // MARK: - Spawn
 
-    private static func slots(count: Int, active: [VMRecord], input: Input, reserved: [RuntimeID: Int] = [:]) -> [Slot]
-    {
+    static func slots(count: Int, active: [VMRecord], input: Input, reserved: [RuntimeID: Int] = [:]) -> [Slot] {
         guard count > 0 else { return [] }
         let totals = input.demand.mapValues { $0.values.reduce(0, +) }
         let queuedTart = input.demand.values.reduce(0) { $0 + ($1[.tart] ?? 0) }
@@ -326,16 +344,10 @@ struct ScalePlan: Equatable {
             // The in-flight pooled clones already hold a slot in their pool.
             for (pool, count) in reserved { running[pool, default: 0] += count }
             guard
-                let chosen = selectRuntime(
-                    unmet: unmet, active: running, caps: caps, fallback: input.defaultRuntime,
-                    poolExists: input.existingPools.contains)
+                let chosen = selectRuntimeForAdmission(unmet: unmet, active: running, caps: caps, input: input)
             else { break }  // unmet demand but no pool may take another instance
             if input.heldRuntimes.contains(chosen) { break }  // every pool with demand is backing off
             if exhausted.contains(chosen) { break }  // the fallback runtime is out of room
-
-            // The account for the instance: the one whose queued jobs it can serve, oldest job first (the most
-            // unmet demand without queue dates), counting the instances that already cover each account's jobs.
-            let account = account(for: chosen, totals: totals, records: sim, input: input)
 
             // The image for a Tart slot, counting only instances that serve demand (warm ones do not).
             var image: String?
@@ -351,14 +363,27 @@ struct ScalePlan: Equatable {
             var pool: String?
             if chosen == .appleContainer, !input.containerPools.isEmpty {
                 guard let picked = chooseContainerPool(records: sim, input: input) else {
+                    if waitsForTartToDrain(runtime: chosen, records: sim, totals: totals, input: input) { break }
                     exhausted.insert(.appleContainer)
                     continue
                 }
                 pool = picked
             }
+            guard resourceFits(runtime: chosen, containerPool: pool, records: sim, input: input) else {
+                if waitsForTartToDrain(runtime: chosen, records: sim, totals: totals, input: input) { break }
+                exhausted.insert(chosen)
+                continue
+            }
 
+            guard
+                let account = accountForAdmission(
+                    runtime: chosen, containerPool: pool, records: sim, totals: totals, input: input)
+            else {
+                exhausted.insert(chosen)
+                continue
+            }
             out.append(Slot(account: account, runtime: chosen, image: image, pool: pool))
-            sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)"))
+            sim.append(simulated(out[out.count - 1], id: "plan-\(out.count)", input: input))
         }
         return out
     }
@@ -397,11 +422,12 @@ struct ScalePlan: Equatable {
     /// Idle (ready) instances beyond `desired`, oldest first, never one whose
     /// removal would leave its pool short of its queued jobs or its pool or
     /// image short of its `min_idle` floor.
-    private static func scaleDown(active: [VMRecord], surplus: Int, input: Input) -> [String] {
+    static func scaleDown(active: [VMRecord], surplus: Int, input: Input, runtime: RuntimeID? = nil) -> [String] {
         var remaining = active
         var surplus = surplus
         var doomed: [String] = []
-        let idle = active.filter { $0.phase == .ready }.sorted { $0.createdAt < $1.createdAt }
+        let idle = active.filter { $0.phase == .ready && (runtime == nil || pool(of: $0, input: input) == runtime) }
+            .sorted { $0.createdAt < $1.createdAt }
         for record in idle where surplus > 0 {
             let without = remaining.filter { $0.id != record.id }
             let poolID = pool(of: record, input: input)

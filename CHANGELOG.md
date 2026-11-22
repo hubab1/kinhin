@@ -4,6 +4,11 @@
 
 <!-- changelog: entries for the next release go here -->
 
+**Added**
+
+- Opt-in idle capacity borrowing lets Tart use spare CPU and RAM from other runtime pools. Queued work for those pools
+  gets priority as slots become free. See [Scaling](docs/scaling.md#borrowing-idle-tart-capacity).
+
 **Changed**
 
 - On phones the docs navigation opens as a drawer over the page from the left — from the right in right-to-left locales — with a scrim and a close button in its top corner, instead of opening above the article (where it was out of sight once you had scrolled down). While it is open the page behind it neither scrolls nor takes the keyboard: Tab stays within the drawer, Escape, the close button and the scrim close it, and the keyboard goes back to the ☰ bar. That bar and the site header stay visible over the drawer, and the main menu opens above them both.

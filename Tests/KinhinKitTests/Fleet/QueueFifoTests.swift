@@ -77,6 +77,27 @@ final class QueueFifoTests: XCTestCase {
         XCTAssertEqual(snapshot.datesByForge["github"]?[.appleContainer], [Date(timeIntervalSince1970: 100)])
     }
 
+    func testNamedPoolsKeepTheirOwnTakenAndWaitingDates() {
+        let snapshot = FleetEngine.queueSnapshot(
+            [
+                (
+                    "github",
+                    [
+                        job("tests", at: 10),
+                        job("portable", at: 1),
+                        job("tests", at: 100, assigned: true),
+                    ]
+                )
+            ],
+            containerPool: { $0.name },
+            runtime: { _ in .appleContainer })
+        XCTAssertEqual(
+            snapshot.datesByContainerPool["github"]?["tests"],
+            [Date(timeIntervalSince1970: 100), Date(timeIntervalSince1970: 10)])
+        XCTAssertEqual(
+            snapshot.datesByContainerPool["github"]?["portable"], [Date(timeIntervalSince1970: 1)])
+    }
+
     func testTheContainerSlotGoesToTheOldestContainerJobNotTheOldestJobOverall() {
         // github has Tart@10 and container@100, gitea has container@20: the container slot belongs to gitea.
         var plan = input(

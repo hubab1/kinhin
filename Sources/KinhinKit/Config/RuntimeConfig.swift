@@ -15,6 +15,9 @@ extension KinhinConfig {
         /// (fractions of the usable CPU+RAM budget; the remainder, if any,
         /// goes to the default runtime).
         public var budget: [String: Double]
+        /// Let on-demand Tart instances use idle shares, within the host's
+        /// combined CPU/RAM limit. Other runtimes retain their partition caps.
+        var borrowIdleBudget = false
         /// Repo or `owner/repo@workflow` → runtime. Repo routes take
         /// precedence over workflow routes; first matching route wins.
         public var routes: [Route]

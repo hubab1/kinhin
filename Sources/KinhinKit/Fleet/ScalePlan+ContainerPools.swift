@@ -33,6 +33,11 @@ extension ScalePlan {
     static func containerUsage(records: [VMRecord], input: Input) -> RuntimeCapacity.Budget {
         var used = RuntimeCapacity.Budget(cpu: 0, memoryGB: 0)
         for record in records where pool(of: record, input: input) == .appleContainer {
+            if input.resources != nil, let allocation = record.resourceReservation, allocation.isValid {
+                used.cpu += allocation.cpu
+                used.memoryGB += allocation.memoryGB
+                continue
+            }
             guard let shape = input.containerPools[containerPool(of: record, input: input)] else { continue }
             used.cpu += shape.cpus
             used.memoryGB += shape.memoryGB
@@ -54,6 +59,9 @@ extension ScalePlan {
             }
             if running >= max { return false }
         }
+        guard resourceFits(runtime: .appleContainer, containerPool: name, records: records, input: input) else {
+            return false
+        }
         guard let budget = input.containerBudget else { return true }
         let used = containerUsage(records: records, input: input)
         return used.cpu + shape.cpus <= budget.cpu && used.memoryGB + shape.memoryGB <= budget.memoryGB
@@ -72,6 +80,14 @@ extension ScalePlan {
 
     /// The named pool `name`'s queued need minus its free instances (negative when it has spare ones).
     static func containerPoolUnmet(_ name: String, records: [VMRecord], input: Input) -> Int {
+        if input.resources != nil, !input.containerPoolDemandByAccount.isEmpty {
+            let coverage = jobCoverage(runtime: .appleContainer, namedPool: name, records: records, input: input)
+            let jobsPerInstance = max(1, input.runnersPerVM)
+            return input.containerPoolDemandByAccount.reduce(0) { total, entry in
+                let jobs = max(0, (entry.value[name] ?? 0) - (coverage[entry.key] ?? 0))
+                return total + Int(ceil(Double(jobs) / Double(jobsPerInstance)))
+            }
+        }
         let key = IdleKey(runtime: .appleContainer, pool: name)
         return queuedNeed(key, input: input) - freeInstances(key, records: records, input: input)
     }
@@ -108,6 +124,9 @@ extension ScalePlan.Input {
     mutating func exclude(containerPools names: Set<String>, demandByAccount: [String: [String: Int]]) {
         guard !names.isEmpty else { return }
         unavailableContainerPools.formUnion(names)
+        containerPoolDemandByAccount = containerPoolDemandByAccount.mapValues {
+            $0.filter { !names.contains($0.key) }
+        }
         for name in names { containerPoolDemand[name] = nil }
         for (account, pools) in demandByAccount {
             let dropped = names.reduce(0) { $0 + (pools[$1] ?? 0) }

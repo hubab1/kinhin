@@ -12,16 +12,20 @@ extension FleetEngine {
         /// jobs a scale-set runner already took first (their runners count as coverage), then the waiting jobs
         /// oldest first, so advancing past the covered prefix lands on the oldest job that is still waiting.
         var datesByForge: [String: [RuntimeID: [Date]]]
+        var datesByContainerPool: [String: [String: [Date]]]
     }
 
     /// Fold each forge's (already FIFO-ordered) jobs into one queue. A job a scale-set runner already took is
     /// counted in demand but is not waiting, so it is left out here.
     static func queueSnapshot(
-        _ perForge: [(account: String, jobs: [ForgeJob])], runtime: (ForgeJob) -> RuntimeID
+        _ perForge: [(account: String, jobs: [ForgeJob])],
+        containerPool: (ForgeJob) -> String? = { _ in nil },
+        runtime: (ForgeJob) -> RuntimeID
     ) -> QueueSnapshot {
         var entries: [FleetJobsReport.Entry] = []
         var byForge: [String: Int] = [:]
         var dates: [String: [RuntimeID: [Date]]] = [:]
+        var containerDates: [String: [String: [Date]]] = [:]
         for (account, jobs) in perForge {
             let waiting = jobs.filter { !$0.isAssigned }
             byForge[account] = waiting.count
@@ -41,6 +45,16 @@ extension FleetEngine {
                 let ordered = (taken[pool] ?? []).sorted() + (waitingDates[pool] ?? []).sorted()
                 if !ordered.isEmpty { dates[account, default: [:]][pool] = ordered }
             }
+            let byContainerPool = Dictionary(
+                grouping: jobs.compactMap { job in
+                    containerPool(job).map { (pool: $0, job: job) }
+                }, by: { $0.pool })
+            containerDates[account] = byContainerPool.mapValues { entries in
+                let jobs = entries.map(\.job)
+                let taken = jobs.filter(\.isAssigned).map { $0.correlation?.enqueuedAt ?? .distantPast }
+                let waiting = jobs.filter { !$0.isAssigned }.compactMap { $0.correlation?.enqueuedAt }
+                return taken.sorted() + waiting.sorted()
+            }
             for job in waiting {
                 entries.append(
                     FleetJobsReport.Entry(
@@ -50,7 +64,8 @@ extension FleetEngine {
         }
         let ordered = FleetJobsReport.fifo(entries)
         return QueueSnapshot(
-            entries: Array(ordered.prefix(FleetStatus.queuedJobsLimit)), byForge: byForge, datesByForge: dates)
+            entries: Array(ordered.prefix(FleetStatus.queuedJobsLimit)), byForge: byForge, datesByForge: dates,
+            datesByContainerPool: containerDates)
     }
 
     /// Running jobs with a job two forges both reported counted once: the same runner, job and repository.

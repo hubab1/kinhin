@@ -86,6 +86,9 @@ public struct VMRecord: Codable, Sendable, Identifiable, Equatable {
     /// a daemon restart drives the instance as the pool it was started in; an instance adopted without a record, or
     /// whose pool was removed, runs as the default pool (`ContainerConfig.defaultPool`).
     public var pool: String?
+    /// The original allocation, retained through deleting/failed states until
+    /// the runtime instance is confirmed gone and its record is removed.
+    public var resourceReservation: VMResourceReservation?
     /// Repositories with a job currently executing on this VM (org scope
     /// attribution, stamped by the reconcile loop from in-progress jobs;
     /// nil when nothing is running or the scope is a single repo).
